@@ -61,10 +61,13 @@ interface PathEntry {
   id: string
   at: string
   from: string
+  verb: string
   choice: string
   to: string
   testId?: string
   targetNumber?: number
+  dicePool?: number
+  hackingPoolSpent?: number
   dice?: number[]
   successes?: number
   tallyIncrease?: number
@@ -187,6 +190,18 @@ function loadStoredAppState(): StoredAppState {
   return { version: 1, deck: seedDeck, host: seedHost, hostUrl: HAPPY_CAT_URL, crawl: freshCrawl(seedHost) }
 }
 
+function verbForChoice(choice: FlowChoice) {
+  if (!choice.testId) return 'Move'
+  if (choice.testId === 'logon') return 'Enter'
+  if (choice.testId === 'browsePublic') return 'Survey'
+  if (choice.testId === 'searchCustomer') return 'Search'
+  if (choice.testId === 'staffRecords') return 'Open'
+  if (choice.testId === 'controlSlave' || choice.testId === 'alterStore') return 'Command'
+  if (choice.testId === 'evadeTrace') return 'Slip Away'
+  if (choice.testId === 'fightIc') return 'Face Opposition'
+  return 'Act'
+}
+
 function bestUtility(deck: DeckRuntime, testId?: string) {
   const categories: Record<string, UtilityCategory[]> = {
     logon: ['stealth', 'utility'],
@@ -216,8 +231,17 @@ function App() {
   const [hostUrl, setHostUrl] = useState(initialState.hostUrl)
   const [crawl, setCrawl] = useState<CrawlState>(initialState.crawl)
   const [message, setMessage] = useState('')
+  const [computerSkill, setComputerSkill] = useState(8)
+  const [hackingPoolAvailable, setHackingPoolAvailable] = useState(6)
+  const [hackingPoolCommit, setHackingPoolCommit] = useState(0)
+  const [selectedChoiceIndex, setSelectedChoiceIndex] = useState(0)
   const currentNode = useMemo(() => host.flow.nodes.find((node) => node.id === crawl.currentNodeId) ?? host.flow.nodes[0], [host, crawl.currentNodeId])
   const nextSheaf = host.securitySheaf.find((step) => step.threshold > crawl.securityTally)
+  const selectedChoice = currentNode.choices[selectedChoiceIndex]
+  const selectedPersona = selectedChoice ? testPersona(selectedChoice.testId) : 'sensors'
+  const selectedUtility = selectedChoice ? bestUtility(deck, selectedChoice.testId) : 0
+  const selectedTargetNumber = selectedChoice?.testId ? (host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating) : undefined
+  const selectedDicePool = selectedChoice?.testId ? Math.max(1, computerSkill + Math.min(hackingPoolCommit, hackingPoolAvailable)) : undefined
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, deck, host, hostUrl, crawl }))
@@ -242,6 +266,7 @@ function App() {
     if (!isHostProfile(nextHost)) throw new Error('Scenario JSON must include host id/name and flow.startNodeId with flow.nodes[].')
     setHost(nextHost)
     setCrawl(freshCrawl(nextHost))
+    setSelectedChoiceIndex(0)
     setMessage(`Loaded ${nextHost.name} from ${source}.`)
   }
 
@@ -302,20 +327,21 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  function choose(choice: FlowChoice) {
+  function resolveSelectedChoice() {
+    if (!selectedChoice) return
     const from = currentNode.id
     let dice: number[] | undefined
     let successes: number | undefined
     let targetNumber: number | undefined
+    let dicePool: number | undefined
     let tallyIncrease = 0
     let sheaf: string[] = []
+    const poolSpent = selectedChoice.testId ? Math.min(hackingPoolCommit, hackingPoolAvailable) : 0
 
-    if (choice.testId) {
-      const tn = host.taskTargetNumbers[choice.testId] ?? host.hostRating
+    if (selectedChoice.testId) {
+      const tn = host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating
       targetNumber = tn
-      const persona = deck.persona[testPersona(choice.testId)]
-      const utility = Math.floor(bestUtility(deck, choice.testId) / 4)
-      const dicePool = Math.max(1, 8 + Math.floor(persona / 3) + utility)
+      dicePool = Math.max(1, computerSkill + poolSpent)
       dice = Array.from({ length: dicePool }, () => rollOpenD6(tn))
       successes = dice.filter((die) => die >= tn).length
       const securityDice = Array.from({ length: host.securityValue }, () => rollOpenD6(deck.detectionFactor))
@@ -328,10 +354,13 @@ function App() {
       id: `path-${Date.now()}`,
       at: new Date().toLocaleTimeString(),
       from,
-      choice: choice.label,
-      to: choice.to,
-      testId: choice.testId,
+      verb: verbForChoice(selectedChoice),
+      choice: selectedChoice.label,
+      to: selectedChoice.to,
+      testId: selectedChoice.testId,
       targetNumber,
+      dicePool,
+      hackingPoolSpent: poolSpent,
       dice,
       successes,
       tallyIncrease,
@@ -339,15 +368,19 @@ function App() {
     }
 
     setCrawl((current) => ({
-      currentNodeId: choice.to,
-      visitedNodeIds: [...new Set([...current.visitedNodeIds, choice.to])],
+      currentNodeId: selectedChoice.to,
+      visitedNodeIds: [...new Set([...current.visitedNodeIds, selectedChoice.to])],
       securityTally: current.securityTally + tallyIncrease,
       path: [entry, ...current.path].slice(0, 60),
     }))
+    setSelectedChoiceIndex(0)
+    setHackingPoolCommit(0)
   }
 
   function resetCrawl() {
     setCrawl(freshCrawl(host))
+    setSelectedChoiceIndex(0)
+    setHackingPoolCommit(0)
   }
 
   return (
@@ -400,16 +433,29 @@ function App() {
           <p className="kicker">Current node</p>
           <h2>{currentNode.title}</h2>
           <p>{currentNode.description}</p>
-          <div className="door-list">
+          <div className="door-list verb-list">
             {currentNode.choices.length === 0 && <p className="empty">No more doors from here.</p>}
-            {currentNode.choices.map((choice) => <button key={`${choice.label}-${choice.to}`} onClick={() => choose(choice)}><strong>{choice.label}</strong>{choice.testId && <span>Roll TN {host.taskTargetNumbers[choice.testId] ?? host.hostRating}</span>}</button>)}
+            {currentNode.choices.map((choice, index) => <button key={`${choice.label}-${choice.to}`} className={selectedChoiceIndex === index ? 'selected' : ''} onClick={() => setSelectedChoiceIndex(index)}><strong>{verbForChoice(choice)}</strong><span>{choice.label}</span>{choice.testId && <small>TN {host.taskTargetNumbers[choice.testId] ?? host.hostRating}</small>}</button>)}
           </div>
+          {selectedChoice && <div className="roll-preview">
+            <p className="kicker">Selected verb</p>
+            <h3>{verbForChoice(selectedChoice)}: {selectedChoice.label}</h3>
+            {selectedChoice.testId ? <>
+              <div className="roll-grid">
+                <label>Computer skill<input type="number" min="1" value={computerSkill} onChange={(event) => setComputerSkill(Number(event.target.value))} /></label>
+                <label>Hacking Pool available<input type="number" min="0" value={hackingPoolAvailable} onChange={(event) => setHackingPoolAvailable(Number(event.target.value))} /></label>
+                <label>Hacking Pool for this roll<input type="number" min="0" max={hackingPoolAvailable} value={hackingPoolCommit} onChange={(event) => setHackingPoolCommit(Number(event.target.value))} /></label>
+              </div>
+              <p className="roll-formula">Roll {selectedDicePool} dice vs TN {selectedTargetNumber}. Base dice are Computer {computerSkill} + Hacking Pool {Math.min(hackingPoolCommit, hackingPoolAvailable)}. Relevant persona: {selectedPersona} {deck.persona[selectedPersona]}; best matching utility rating: {selectedUtility}. Host response check rolls {host.securityValue} dice vs DF {deck.detectionFactor} and may raise Tally.</p>
+              <button className="roll-button" onClick={resolveSelectedChoice}>Roll and open this branch</button>
+            </> : <button className="roll-button" onClick={resolveSelectedChoice}>Open this branch</button>}
+          </div>}
         </section>
 
         <aside className="log-panel">
           <h2>Path Log</h2>
           {crawl.path.length === 0 && <p className="empty">No choices yet.</p>}
-          {crawl.path.map((entry) => <article key={entry.id}><strong>{entry.choice}</strong><span>{entry.at} · {entry.from} → {entry.to}</span>{entry.dice && <p>{entry.successes} success(es) vs TN {entry.targetNumber}; dice [{entry.dice.join(', ')}]; tally +{entry.tallyIncrease}</p>}{entry.sheaf && entry.sheaf.length > 0 && <p className="sheaf">Sheaf: {entry.sheaf.join(' · ')}</p>}</article>)}
+          {crawl.path.map((entry) => <article key={entry.id}><strong>{entry.verb}: {entry.choice}</strong><span>{entry.at} · {entry.from} → {entry.to}</span>{entry.dice && <p>{entry.successes} success(es) vs TN {entry.targetNumber}; pool {entry.dicePool} dice, Hacking Pool spent {entry.hackingPoolSpent}; dice [{entry.dice.join(', ')}]; tally +{entry.tallyIncrease}</p>}{entry.sheaf && entry.sheaf.length > 0 && <p className="sheaf">Sheaf: {entry.sheaf.join(' · ')}</p>}</article>)}
         </aside>
       </section>
     </main>
