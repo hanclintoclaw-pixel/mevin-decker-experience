@@ -1,6 +1,6 @@
 # Scenario JSON
 
-The Decker Experience loads a fictional Matrix-host scenario from JSON. The campaign wiki should hold canonical scenario files under `data/matrix-hosts/`, with prose context on the matching `Tech/Matrix/*.md` page.
+The Decker Experience loads a fictional Matrix-host scenario from JSON. The campaign wiki should hold canonical scenario files under `data/matrix-hosts/`, with prose context on the matching `Tech/Matrix/*.md` page. For campaign host design conventions, see the wiki's Matrix Host Construction Guide.
 
 ## Required shape
 
@@ -38,7 +38,8 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 - `flow.startNodeId` must match one node `id`.
 - Every `choice.to` should match another node `id` unless it intentionally points to a future placeholder.
 - `choice.testId` is optional. If present, the app uses `taskTargetNumbers[testId]` or falls back to `hostRating`.
-- Each node may have 1-4 featured `choices`. Existing 2-choice profiles remain valid; a 1-choice node is appropriate for a single locked door, terminal, or forced-forward obstacle.
+- The recommended campaign pattern is at most two initial doors: an optional no-roll public visitor door and a secure/hidden decker intrusion door.
+- Each private-side node may have 1-4 featured `choices`. Existing 2-choice profiles remain valid; a 1-choice node is appropriate for a single locked door, terminal, or forced-forward obstacle.
 - The app also provides a custom/RAW action lane at every node for GM-adjudicated operations outside the featured choices.
 - Tested choices are gated: by default, 1+ success unlocks and reveals the target node; failure locks that choice for the current crawl and reveals nothing beyond it.
 - `choice.unlockSuccesses` is optional and raises the success threshold for harder routes. Omit it for the default 1-success gate.
