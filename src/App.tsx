@@ -32,6 +32,8 @@ interface FlowChoice {
   to: string
   testId?: string
   unlockSuccesses?: number
+  targetNumber?: number
+  securityValue?: number
 }
 
 interface FlowNode {
@@ -313,7 +315,7 @@ function App() {
   const selectedRequiredSuccesses = selectedChoice?.testId ? Math.max(1, selectedChoice.unlockSuccesses ?? 1) : 0
   const selectedPersona = selectedChoice ? testPersona(selectedChoice.testId) : 'sensors'
   const selectedUtility = selectedChoice ? bestUtility(deck, selectedChoice.testId) : 0
-  const selectedTargetNumber = selectedChoice?.testId ? (host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating) : undefined
+  const selectedTargetNumber = selectedChoice?.testId ? (selectedChoice.targetNumber ?? host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating) : undefined
   const selectedDicePool = selectedChoice?.testId ? Math.max(1, computerSkill + Math.min(hackingPoolCommit, hackingPoolAvailable)) : undefined
 
   useEffect(() => {
@@ -443,12 +445,12 @@ function App() {
     const poolSpent = selectedChoice.testId ? Math.min(hackingPoolCommit, hackingPoolAvailable) : 0
 
     if (selectedChoice.testId) {
-      const tn = host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating
+      const tn = selectedChoice.targetNumber ?? host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating
       targetNumber = tn
       dicePool = Math.max(1, computerSkill + poolSpent)
       dice = Array.from({ length: dicePool }, () => rollOpenD6(tn))
       successes = dice.filter((die) => die >= tn).length
-      const securityDice = Array.from({ length: host.securityValue }, () => rollOpenD6(deck.detectionFactor))
+      const securityDice = Array.from({ length: selectedChoice.securityValue ?? host.securityValue }, () => rollOpenD6(deck.detectionFactor))
       tallyIncrease = securityDice.filter((die) => die >= deck.detectionFactor).length
       const after = crawl.securityTally + tallyIncrease
       sheaf = host.securitySheaf.filter((step) => step.threshold > crawl.securityTally && step.threshold <= after).map((step) => `${step.threshold}: ${step.label}`)
@@ -602,7 +604,7 @@ function App() {
             {currentNode.choices.map((choice, index) => {
               const gate = choiceGates[choiceKey(currentNode.id, index)]
               const isLocked = gate?.state === 'locked'
-              return <button key={`${choice.label}-${choice.to}`} className={`${selectedChoiceIndex === index ? 'selected' : ''} ${isLocked ? 'locked' : ''}`} disabled={isLocked} onClick={() => setSelectedChoiceIndex(index)}><strong>{isLocked ? 'Locked' : verbForChoice(choice)}</strong><span>{isLocked ? 'Route burned by failed roll' : choice.label}</span>{choice.testId && <small>TN {host.taskTargetNumbers[choice.testId] ?? host.hostRating} · unlocks on {Math.max(1, choice.unlockSuccesses ?? 1)}+ success(es){gate?.state === 'unlocked' ? ' · unlocked' : ''}</small>}</button>
+              return <button key={`${choice.label}-${choice.to}`} className={`${selectedChoiceIndex === index ? 'selected' : ''} ${isLocked ? 'locked' : ''}`} disabled={isLocked} onClick={() => setSelectedChoiceIndex(index)}><strong>{isLocked ? 'Locked' : verbForChoice(choice)}</strong><span>{isLocked ? 'Route burned by failed roll' : choice.label}</span>{choice.testId && <small>TN {choice.targetNumber ?? host.taskTargetNumbers[choice.testId] ?? host.hostRating} · unlocks on {Math.max(1, choice.unlockSuccesses ?? 1)}+ success(es){gate?.state === 'unlocked' ? ' · unlocked' : ''}</small>}</button>
             })}
           </div>
           <div className="custom-action">
@@ -622,7 +624,7 @@ function App() {
                 <label>Hacking Pool available<input type="number" min="0" value={hackingPoolAvailable} onChange={(event) => setHackingPoolAvailable(Number(event.target.value))} /></label>
                 <label>Hacking Pool for this roll<input type="number" min="0" max={hackingPoolAvailable} value={hackingPoolCommit} onChange={(event) => setHackingPoolCommit(Number(event.target.value))} /></label>
               </div>
-              <p className="roll-formula">Roll {selectedDicePool} dice vs TN {selectedTargetNumber}. {selectedRequiredSuccesses}+ success(es) unlock this route; zero or too few successes locks it and reveals nothing beyond. Base dice are Computer {computerSkill} + Hacking Pool {Math.min(hackingPoolCommit, hackingPoolAvailable)}. Relevant persona: {selectedPersona} {deck.persona[selectedPersona]}; best matching utility rating: {selectedUtility}. Host response check rolls {host.securityValue} dice vs DF {deck.detectionFactor} and may raise Tally.</p>
+              <p className="roll-formula">Roll {selectedDicePool} dice vs TN {selectedTargetNumber}. {selectedRequiredSuccesses}+ success(es) unlock this route; zero or too few successes locks it and reveals nothing beyond. Base dice are Computer {computerSkill} + Hacking Pool {Math.min(hackingPoolCommit, hackingPoolAvailable)}. Relevant persona: {selectedPersona} {deck.persona[selectedPersona]}; best matching utility rating: {selectedUtility}. Host response check rolls {selectedChoice.securityValue ?? host.securityValue} dice vs DF {deck.detectionFactor} and may raise Tally.</p>
               <button className="roll-button" onClick={resolveSelectedChoice}>Roll to unlock this branch</button>
             </> : <button className="roll-button" onClick={resolveSelectedChoice}>Open this branch</button>}
           </div>}
