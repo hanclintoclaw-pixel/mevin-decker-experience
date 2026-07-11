@@ -90,6 +90,20 @@ h2 { margin: 0 0 0.8rem; }
 .status-grid span { color: #7ee7ff; text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
 .status-grid strong { display: block; font-size: 1.2rem; margin: 0.2rem 0; }
 .status-grid small { display: block; }
+.active-threats {
+  display: grid;
+  grid-template-columns: auto repeat(auto-fit, minmax(14rem, 1fr));
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid rgba(255, 111, 166, 0.38);
+  background: rgba(255, 111, 166, 0.08);
+  border-radius: 22px;
+  padding: 0.8rem 1rem;
+  margin: 1rem 0;
+}
+.active-threats > span { color: #ffb3cf; text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
+.active-threats article { border-left: 2px solid rgba(255, 111, 166, 0.48); padding-left: 0.75rem; }
+.active-threats strong, .active-threats small { display: block; }
 
 .crawl-layout { display: grid; grid-template-columns: 280px 1fr 360px; gap: 1rem; }
 .node-map { display: grid; gap: 0.6rem; align-content: start; }
@@ -162,6 +176,22 @@ h2 { margin: 0 0 0.8rem; }
 .roll-feedback.failure { border-color: rgba(255, 111, 166, 0.82); box-shadow: 0 0 42px rgba(255, 111, 166, 0.30); }
 .roll-feedback.neutral { border-color: rgba(210, 140, 255, 0.64); box-shadow: 0 0 42px rgba(210, 140, 255, 0.24); }
 
+.threat-checkpoint {
+  border: 2px solid rgba(255, 111, 166, 0.56);
+  background:
+    radial-gradient(circle at 10% 0%, rgba(255, 111, 166, 0.18), transparent 22rem),
+    rgba(28, 8, 24, 0.88);
+  border-radius: 22px;
+  margin-top: 1rem;
+  padding: 1rem;
+  box-shadow: 0 0 40px rgba(255, 111, 166, 0.18);
+}
+.threat-checkpoint h3 { margin: 0 0 0.5rem; font-size: clamp(1.7rem, 4vw, 3rem); }
+.threat-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-top: 0.9rem; }
+.threat-actions button { display: grid; gap: 0.35rem; text-align: left; align-content: start; }
+.threat-actions button strong { color: #f5f0ff; }
+.threat-actions button span { color: #ffb3cf; }
+
 .roll-preview {
   border: 1px solid rgba(210, 140, 255, 0.24);
   background: rgba(210, 140, 255, 0.08);
@@ -185,6 +215,7 @@ h2 { margin: 0 0 0.8rem; }
 .log-panel p { color: #cab7ff; margin-bottom: 0; }
 .log-panel article.failed-entry { border-color: rgba(255, 111, 166, 0.35); background: rgba(255, 111, 166, 0.08); }
 .log-panel article.gm-entry { border-color: rgba(210, 140, 255, 0.35); background: rgba(210, 140, 255, 0.08); }
+.log-panel article.threat-entry { border-color: rgba(255, 189, 89, 0.42); background: rgba(255, 189, 89, 0.08); }
 .sheaf { color: #ffb3cf !important; }
 
 @keyframes roll-pop {
@@ -199,8 +230,9 @@ h2 { margin: 0 0 0.8rem; }
   .crawl-hero { flex-direction: column; }
   .loader-panel { grid-template-columns: 1fr; }
   .status-grid { grid-template-columns: 1fr 1fr; }
+  .active-threats { grid-template-columns: 1fr; }
   .crawl-layout { grid-template-columns: 1fr; }
-  .roll-grid, .custom-action-row { grid-template-columns: 1fr; }
+  .roll-grid, .custom-action-row, .threat-actions { grid-template-columns: 1fr; }
   .log-panel { max-height: none; }
 }
 

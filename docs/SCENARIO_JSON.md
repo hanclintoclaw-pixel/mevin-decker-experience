@@ -42,6 +42,7 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 - Each private-side node may have 1-4 featured `choices`. Existing 2-choice profiles remain valid; a 1-choice node is appropriate for a single locked door, terminal, or forced-forward obstacle.
 - The app also provides a custom/RAW action lane at every node for GM-adjudicated operations outside the featured choices.
 - Tested choices are gated: by default, 1+ success unlocks and reveals the target node; failure locks that choice for the current crawl and reveals nothing beyond it.
+- When Security Tally crosses a `securitySheaf` threshold, the app pauses normal navigation with a checkpoint. The player can suppress/evade, fight, ignore, or jack out; ignored or failed checkpoints become active pressure that adds Tally risk to later tested actions.
 - A successful featured action should either reveal a new node or give a specific decker-facing result, such as customer files, shipping records, camera access, or a note to tell/ask the GM.
 - `choice.unlockSuccesses` is optional and raises the success threshold for harder routes. Omit it for the default 1-success gate.
 - `choice.targetNumber` and `choice.securityValue` are optional per-choice overrides for hidden/deeper layers that are harder than the outer Host default.

@@ -86,7 +86,7 @@ interface PathEntry {
   dice?: number[]
   successes?: number
   requiredSuccesses?: number
-  outcome?: 'opened' | 'unlocked' | 'locked' | 'gm'
+  outcome?: 'opened' | 'unlocked' | 'locked' | 'gm' | 'threat'
   tallyIncrease?: number
   sheaf?: string[]
 }
@@ -106,11 +106,22 @@ interface RollFeedback {
   detail: string
 }
 
+interface ThreatCheckpoint {
+  id: string
+  threshold: number
+  label: string
+  effect: string
+  rating: number
+  status: 'pending' | 'active'
+}
+
 interface CrawlState {
   currentNodeId: string
   visitedNodeIds: string[]
   revealedNodeIds?: string[]
   choiceGates?: Record<string, ChoiceGateState>
+  pendingThreats?: ThreatCheckpoint[]
+  activeThreats?: ThreatCheckpoint[]
   securityTally: number
   path: PathEntry[]
 }
@@ -201,7 +212,7 @@ function rollOpenD6(targetNumber: number) {
 }
 
 function freshCrawl(host: HostProfile): CrawlState {
-  return { currentNodeId: host.flow.startNodeId, visitedNodeIds: [host.flow.startNodeId], revealedNodeIds: [host.flow.startNodeId], choiceGates: {}, securityTally: 0, path: [] }
+  return { currentNodeId: host.flow.startNodeId, visitedNodeIds: [host.flow.startNodeId], revealedNodeIds: [host.flow.startNodeId], choiceGates: {}, pendingThreats: [], activeThreats: [], securityTally: 0, path: [] }
 }
 
 function unique(values: string[]) {
@@ -221,6 +232,8 @@ function normalizeCrawl(crawl: CrawlState, host: HostProfile): CrawlState {
     visitedNodeIds: unique(crawl.visitedNodeIds.length ? crawl.visitedNodeIds : [host.flow.startNodeId]),
     revealedNodeIds: unique(revealedNodeIds.length ? revealedNodeIds : [host.flow.startNodeId]),
     choiceGates: crawl.choiceGates ?? {},
+    pendingThreats: crawl.pendingThreats ?? [],
+    activeThreats: crawl.activeThreats ?? [],
     path: crawl.path ?? [],
   }
 }
@@ -309,6 +322,8 @@ function App() {
   const currentNode = useMemo(() => host.flow.nodes.find((node) => node.id === crawl.currentNodeId) ?? host.flow.nodes[0], [host, crawl.currentNodeId])
   const revealedNodeIds = crawl.revealedNodeIds ?? crawl.visitedNodeIds
   const choiceGates = crawl.choiceGates ?? EMPTY_CHOICE_GATES
+  const pendingThreat = crawl.pendingThreats?.[0]
+  const activeThreats = crawl.activeThreats ?? []
   const nextSheaf = host.securitySheaf.find((step) => step.threshold > crawl.securityTally)
   const selectedChoice = currentNode.choices[selectedChoiceIndex]
   const selectedChoiceGate = selectedChoice ? choiceGates[choiceKey(currentNode.id, selectedChoiceIndex)] : undefined
@@ -451,7 +466,7 @@ function App() {
       dice = Array.from({ length: dicePool }, () => rollOpenD6(tn))
       successes = dice.filter((die) => die >= tn).length
       const securityDice = Array.from({ length: selectedChoice.securityValue ?? host.securityValue }, () => rollOpenD6(deck.detectionFactor))
-      tallyIncrease = securityDice.filter((die) => die >= deck.detectionFactor).length
+      tallyIncrease = securityDice.filter((die) => die >= deck.detectionFactor).length + activeThreats.length
       const after = crawl.securityTally + tallyIncrease
       sheaf = host.securitySheaf.filter((step) => step.threshold > crawl.securityTally && step.threshold <= after).map((step) => `${step.threshold}: ${step.label}`)
     }
@@ -497,18 +512,105 @@ function App() {
         ...(current.choiceGates ?? {}),
         [selectedKey]: gateState,
       }
+      const after = current.securityTally + tallyIncrease
+      const existingThreatIds = new Set([...(current.pendingThreats ?? []), ...(current.activeThreats ?? [])].map((threat) => threat.id))
+      const newThreats = host.securitySheaf
+        .filter((step) => step.threshold > current.securityTally && step.threshold <= after)
+        .map((step) => ({
+          id: `threat-${step.threshold}-${step.label}`,
+          threshold: step.threshold,
+          label: step.label,
+          effect: step.effect,
+          rating: Math.max(selectedChoice.securityValue ?? host.securityValue, Math.ceil(step.threshold / 2)),
+          status: 'pending' as const,
+        }))
+        .filter((threat) => !existingThreatIds.has(threat.id))
       return {
         currentNodeId: passed ? selectedChoice.to : from,
         visitedNodeIds: passed ? unique([...current.visitedNodeIds, selectedChoice.to]) : current.visitedNodeIds,
         revealedNodeIds: passed ? unique([...currentRevealedNodeIds, selectedChoice.to]) : currentRevealedNodeIds,
         choiceGates: nextChoiceGates,
-        securityTally: current.securityTally + tallyIncrease,
+        pendingThreats: [...(current.pendingThreats ?? []), ...newThreats],
+        activeThreats: current.activeThreats ?? [],
+        securityTally: after,
         path: [entry, ...current.path].slice(0, 60),
       }
     })
     setMessage(passed ? `Unlocked: ${selectedChoice.label}.` : `Locked: ${selectedChoice.label} needed ${selectedRequiredSuccesses} success(es), rolled ${successes ?? 0}.`)
     setSelectedChoiceIndex(0)
     setHackingPoolCommit(0)
+  }
+
+  function threatEntry(threat: ThreatCheckpoint, verb: string, choice: string, dice?: number[], successes?: number, targetNumber?: number, requiredSuccesses?: number, tallyIncrease = 0): PathEntry {
+    return {
+      id: `path-${Date.now()}`,
+      at: new Date().toLocaleTimeString(),
+      from: currentNode.id,
+      verb,
+      choice,
+      to: currentNode.id,
+      testId: 'threatCheckpoint',
+      targetNumber,
+      dicePool: dice?.length,
+      hackingPoolSpent: dice ? Math.min(hackingPoolCommit, hackingPoolAvailable) : 0,
+      dice,
+      successes,
+      requiredSuccesses,
+      outcome: 'threat',
+      tallyIncrease,
+      sheaf: [`${threat.threshold}: ${threat.label}`],
+    }
+  }
+
+  function rollThreatCheckpoint(action: 'suppress' | 'fight' | 'jackout') {
+    if (!pendingThreat) return
+    const targetNumber = action === 'jackout' ? Math.max(4, pendingThreat.rating - 1) : pendingThreat.rating
+    const requiredSuccesses = action === 'fight' ? 2 : 1
+    const dicePool = Math.max(1, computerSkill + Math.min(hackingPoolCommit, hackingPoolAvailable))
+    const dice = Array.from({ length: dicePool }, () => rollOpenD6(targetNumber))
+    const successes = dice.filter((die) => die >= targetNumber).length
+    const passed = successes >= requiredSuccesses
+    const tallyIncrease = passed ? 0 : 1
+    const verb = action === 'suppress' ? 'Suppress IC' : action === 'fight' ? 'Cybercombat' : 'Jack Out'
+    const entry = threatEntry(pendingThreat, verb, pendingThreat.label, dice, successes, targetNumber, requiredSuccesses, tallyIncrease)
+    const logoffNode = host.flow.nodes.find((node) => node.id === 'logoff')
+
+    setCrawl((current) => {
+      const remainingThreats = (current.pendingThreats ?? []).slice(1)
+      const activatedThreat = passed ? [] : [{ ...pendingThreat, status: 'active' as const }]
+      return {
+        ...current,
+        currentNodeId: passed && action === 'jackout' && logoffNode ? logoffNode.id : current.currentNodeId,
+        visitedNodeIds: passed && action === 'jackout' && logoffNode ? unique([...current.visitedNodeIds, logoffNode.id]) : current.visitedNodeIds,
+        revealedNodeIds: passed && action === 'jackout' && logoffNode ? unique([...(current.revealedNodeIds ?? current.visitedNodeIds), logoffNode.id]) : current.revealedNodeIds,
+        pendingThreats: remainingThreats,
+        activeThreats: [...(current.activeThreats ?? []), ...activatedThreat],
+        securityTally: current.securityTally + tallyIncrease,
+        path: [entry, ...current.path].slice(0, 60),
+      }
+    })
+    setRollFeedback({
+      id: Date.now(),
+      tone: passed ? 'success' : 'failure',
+      icon: passed ? '🧊' : '⚠️',
+      title: passed ? `${verb} succeeded` : `${pendingThreat.label} is active`,
+      detail: `${successes}/${requiredSuccesses} successes vs TN ${targetNumber}`,
+    })
+    setMessage(passed ? `${pendingThreat.label} handled.` : `${pendingThreat.label} remains active and will add pressure to future tests.`)
+    setHackingPoolCommit(0)
+  }
+
+  function ignoreThreatCheckpoint() {
+    if (!pendingThreat) return
+    const entry = threatEntry(pendingThreat, 'Ignore IC', `${pendingThreat.label} stays active`)
+    setCrawl((current) => ({
+      ...current,
+      pendingThreats: (current.pendingThreats ?? []).slice(1),
+      activeThreats: [...(current.activeThreats ?? []), { ...pendingThreat, status: 'active' }],
+      path: [entry, ...current.path].slice(0, 60),
+    }))
+    setRollFeedback({ id: Date.now(), tone: 'neutral', icon: '👁️', title: `${pendingThreat.label} ignored`, detail: 'It stays active and adds pressure to future tested actions.' })
+    setMessage(`${pendingThreat.label} is now active. Continuing under pressure.`)
   }
 
   function recordCustomAction() {
@@ -583,9 +685,11 @@ function App() {
       <section className="status-grid">
         <article><span>Deck</span><strong>{deck.sourceName}</strong><small>{deck.handle} · DF {deck.detectionFactor}</small></article>
         <article><span>Matrix host</span><strong>{host.name}</strong><small>{host.securityCode.toUpperCase()}-{host.securityValue}</small></article>
-        <article><span>Tally</span><strong>{crawl.securityTally}</strong><small>{nextSheaf ? `Next: ${nextSheaf.threshold} ${nextSheaf.label}` : 'End / GM escalation'}</small></article>
-        <article><span>Location</span><strong>{currentNode.title}</strong><small>{currentNode.kind}</small></article>
+        <article><span>Tally</span><strong>{crawl.securityTally}</strong><small>{pendingThreat ? `Checkpoint: ${pendingThreat.label}` : nextSheaf ? `Next: ${nextSheaf.threshold} ${nextSheaf.label}` : 'End / GM escalation'}</small></article>
+        <article><span>Location</span><strong>{currentNode.title}</strong><small>{activeThreats.length ? `${activeThreats.length} active threat(s)` : currentNode.kind}</small></article>
       </section>
+
+      {activeThreats.length > 0 && <section className="active-threats"><span>Active pressure</span>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Rating {threat.rating} · +1 Tally pressure on tested actions</small></article>)}</section>}
 
       <section className="crawl-layout">
         <aside className="node-map">
@@ -598,42 +702,60 @@ function App() {
           <h2>{currentNode.title}</h2>
           <p>{currentNode.description}</p>
           {rollFeedback && <div key={rollFeedback.id} className={`roll-feedback ${rollFeedback.tone}`}><strong>{rollFeedback.icon} {rollFeedback.title}</strong><span>{rollFeedback.detail}</span></div>}
-          <div className="action-header"><span>Featured actions</span><small>{currentNode.choices.length} shown · scenario profiles may use 1-4 here</small></div>
-          <div className="door-list verb-list">
-            {currentNode.choices.length === 0 && <p className="empty">No more featured actions from here.</p>}
-            {currentNode.choices.map((choice, index) => {
-              const gate = choiceGates[choiceKey(currentNode.id, index)]
-              const isLocked = gate?.state === 'locked'
-              return <button key={`${choice.label}-${choice.to}`} className={`${selectedChoiceIndex === index ? 'selected' : ''} ${isLocked ? 'locked' : ''}`} disabled={isLocked} onClick={() => setSelectedChoiceIndex(index)}><strong>{isLocked ? 'Locked' : verbForChoice(choice)}</strong><span>{isLocked ? 'Route burned by failed roll' : choice.label}</span>{choice.testId && <small>TN {choice.targetNumber ?? host.taskTargetNumbers[choice.testId] ?? host.hostRating} · unlocks on {Math.max(1, choice.unlockSuccesses ?? 1)}+ success(es){gate?.state === 'unlocked' ? ' · unlocked' : ''}</small>}</button>
-            })}
-          </div>
-          <div className="custom-action">
-            <label htmlFor="custom-action">Custom / RAW action</label>
-            <div className="custom-action-row">
-              <input id="custom-action" value={customAction} placeholder="Describe a Matrix action for GM adjudication" onChange={(event) => setCustomAction(event.target.value)} />
-              <button onClick={recordCustomAction}>Record GM Call</button>
+          {pendingThreat ? <div className="threat-checkpoint">
+            <p className="kicker">Security checkpoint</p>
+            <h3>{pendingThreat.label}</h3>
+            <p>{pendingThreat.effect}</p>
+            <p className="roll-formula">Rating {pendingThreat.rating}. Normal host choices pause until you handle this alert. Suppress/Evade needs 1 success, Fight needs 2 successes, and Jack Out attempts a safer exit. Ignoring it keeps the threat active and adds +1 Tally pressure to future tested actions.</p>
+            <div className="roll-grid">
+              <label>Computer skill<input type="number" min="1" value={computerSkill} onChange={(event) => setComputerSkill(Number(event.target.value))} /></label>
+              <label>Hacking Pool available<input type="number" min="0" value={hackingPoolAvailable} onChange={(event) => setHackingPoolAvailable(Number(event.target.value))} /></label>
+              <label>Hacking Pool for this roll<input type="number" min="0" max={hackingPoolAvailable} value={hackingPoolCommit} onChange={(event) => setHackingPoolCommit(Number(event.target.value))} /></label>
             </div>
-            <p className="micro">Use this when the decker wants a normal SR3-style operation outside the featured branches.</p>
-          </div>
-          {selectedChoice && <div className="roll-preview">
-            <p className="kicker">Selected verb</p>
-            <h3>{verbForChoice(selectedChoice)}: {selectedChoice.label}</h3>
-            {selectedChoiceGate?.state === 'locked' ? <p className="empty">This route is locked. The failed test did not reveal what was beyond it.</p> : selectedChoice.testId ? <>
-              <div className="roll-grid">
-                <label>Computer skill<input type="number" min="1" value={computerSkill} onChange={(event) => setComputerSkill(Number(event.target.value))} /></label>
-                <label>Hacking Pool available<input type="number" min="0" value={hackingPoolAvailable} onChange={(event) => setHackingPoolAvailable(Number(event.target.value))} /></label>
-                <label>Hacking Pool for this roll<input type="number" min="0" max={hackingPoolAvailable} value={hackingPoolCommit} onChange={(event) => setHackingPoolCommit(Number(event.target.value))} /></label>
+            <div className="threat-actions">
+              <button onClick={() => rollThreatCheckpoint('suppress')}><strong>Suppress / Evade</strong><span>Roll vs TN {pendingThreat.rating}</span></button>
+              <button onClick={() => rollThreatCheckpoint('fight')}><strong>Fight IC</strong><span>Roll vs TN {pendingThreat.rating}, need 2</span></button>
+              <button onClick={ignoreThreatCheckpoint}><strong>Ignore and Continue</strong><span>Threat becomes active pressure</span></button>
+              <button onClick={() => rollThreatCheckpoint('jackout')}><strong>Jack Out</strong><span>Roll vs TN {Math.max(4, pendingThreat.rating - 1)}</span></button>
+            </div>
+          </div> : <>
+            <div className="action-header"><span>Featured actions</span><small>{currentNode.choices.length} shown · scenario profiles may use 1-4 here</small></div>
+            <div className="door-list verb-list">
+              {currentNode.choices.length === 0 && <p className="empty">No more featured actions from here.</p>}
+              {currentNode.choices.map((choice, index) => {
+                const gate = choiceGates[choiceKey(currentNode.id, index)]
+                const isLocked = gate?.state === 'locked'
+                return <button key={`${choice.label}-${choice.to}`} className={`${selectedChoiceIndex === index ? 'selected' : ''} ${isLocked ? 'locked' : ''}`} disabled={isLocked} onClick={() => setSelectedChoiceIndex(index)}><strong>{isLocked ? 'Locked' : verbForChoice(choice)}</strong><span>{isLocked ? 'Route burned by failed roll' : choice.label}</span>{choice.testId && <small>TN {choice.targetNumber ?? host.taskTargetNumbers[choice.testId] ?? host.hostRating} · unlocks on {Math.max(1, choice.unlockSuccesses ?? 1)}+ success(es){gate?.state === 'unlocked' ? ' · unlocked' : ''}</small>}</button>
+              })}
+            </div>
+            <div className="custom-action">
+              <label htmlFor="custom-action">Custom / RAW action</label>
+              <div className="custom-action-row">
+                <input id="custom-action" value={customAction} placeholder="Describe a Matrix action for GM adjudication" onChange={(event) => setCustomAction(event.target.value)} />
+                <button onClick={recordCustomAction}>Record GM Call</button>
               </div>
-              <p className="roll-formula">Roll {selectedDicePool} dice vs TN {selectedTargetNumber}. {selectedRequiredSuccesses}+ success(es) unlock this route; zero or too few successes locks it and reveals nothing beyond. Base dice are Computer {computerSkill} + Hacking Pool {Math.min(hackingPoolCommit, hackingPoolAvailable)}. Relevant persona: {selectedPersona} {deck.persona[selectedPersona]}; best matching utility rating: {selectedUtility}. Host response check rolls {selectedChoice.securityValue ?? host.securityValue} dice vs DF {deck.detectionFactor} and may raise Tally.</p>
-              <button className="roll-button" onClick={resolveSelectedChoice}>Roll to unlock this branch</button>
-            </> : <button className="roll-button" onClick={resolveSelectedChoice}>Open this branch</button>}
-          </div>}
+              <p className="micro">Use this when the decker wants a normal SR3-style operation outside the featured branches.</p>
+            </div>
+            {selectedChoice && <div className="roll-preview">
+              <p className="kicker">Selected verb</p>
+              <h3>{verbForChoice(selectedChoice)}: {selectedChoice.label}</h3>
+              {selectedChoiceGate?.state === 'locked' ? <p className="empty">This route is locked. The failed test did not reveal what was beyond it.</p> : selectedChoice.testId ? <>
+                <div className="roll-grid">
+                  <label>Computer skill<input type="number" min="1" value={computerSkill} onChange={(event) => setComputerSkill(Number(event.target.value))} /></label>
+                  <label>Hacking Pool available<input type="number" min="0" value={hackingPoolAvailable} onChange={(event) => setHackingPoolAvailable(Number(event.target.value))} /></label>
+                  <label>Hacking Pool for this roll<input type="number" min="0" max={hackingPoolAvailable} value={hackingPoolCommit} onChange={(event) => setHackingPoolCommit(Number(event.target.value))} /></label>
+                </div>
+                <p className="roll-formula">Roll {selectedDicePool} dice vs TN {selectedTargetNumber}. {selectedRequiredSuccesses}+ success(es) unlock this route; zero or too few successes locks it and reveals nothing beyond. Base dice are Computer {computerSkill} + Hacking Pool {Math.min(hackingPoolCommit, hackingPoolAvailable)}. Relevant persona: {selectedPersona} {deck.persona[selectedPersona]}; best matching utility rating: {selectedUtility}. Host response check rolls {selectedChoice.securityValue ?? host.securityValue} dice vs DF {deck.detectionFactor} and may raise Tally{activeThreats.length ? `, plus ${activeThreats.length} active threat pressure` : ''}.</p>
+                <button className="roll-button" onClick={resolveSelectedChoice}>Roll to unlock this branch</button>
+              </> : <button className="roll-button" onClick={resolveSelectedChoice}>Open this branch</button>}
+            </div>}
+          </>}
         </section>
 
         <aside className="log-panel">
           <h2>Path Log</h2>
           {crawl.path.length === 0 && <p className="empty">No choices yet.</p>}
-          {crawl.path.map((entry) => <article key={entry.id} className={entry.outcome === 'locked' ? 'failed-entry' : entry.outcome === 'gm' ? 'gm-entry' : ''}><strong>{entry.verb}: {entry.choice}</strong><span>{entry.at} · {entry.from} {entry.outcome === 'locked' ? '↛' : entry.outcome === 'gm' ? '◇' : '→'} {entry.to}</span>{entry.outcome === 'gm' && <p>Custom action recorded; GM chooses the RAW test, time cost, tally pressure, and fictional outcome.</p>}{entry.dice && <p>{entry.successes} success(es) vs TN {entry.targetNumber}; needed {entry.requiredSuccesses}; pool {entry.dicePool} dice, Hacking Pool spent {entry.hackingPoolSpent}; dice [{entry.dice.join(', ')}]; tally +{entry.tallyIncrease}; {entry.outcome === 'locked' ? 'route locked' : 'route unlocked'}</p>}{entry.sheaf && entry.sheaf.length > 0 && <p className="sheaf">Sheaf: {entry.sheaf.join(' · ')}</p>}</article>)}
+          {crawl.path.map((entry) => <article key={entry.id} className={entry.outcome === 'locked' ? 'failed-entry' : entry.outcome === 'gm' ? 'gm-entry' : entry.outcome === 'threat' ? 'threat-entry' : ''}><strong>{entry.verb}: {entry.choice}</strong><span>{entry.at} · {entry.from} {entry.outcome === 'locked' ? '↛' : entry.outcome === 'gm' ? '◇' : entry.outcome === 'threat' ? '⚠' : '→'} {entry.to}</span>{entry.outcome === 'gm' && <p>Custom action recorded; GM chooses the RAW test, time cost, tally pressure, and fictional outcome.</p>}{entry.dice && <p>{entry.successes} success(es) vs TN {entry.targetNumber}; needed {entry.requiredSuccesses}; pool {entry.dicePool} dice, Hacking Pool spent {entry.hackingPoolSpent}; dice [{entry.dice.join(', ')}]; tally +{entry.tallyIncrease}; {entry.outcome === 'locked' ? 'route locked' : entry.outcome === 'threat' ? 'checkpoint action' : 'route unlocked'}</p>}{entry.sheaf && entry.sheaf.length > 0 && <p className="sheaf">Sheaf: {entry.sheaf.join(' · ')}</p>}</article>)}
         </aside>
       </section>
     </main>
