@@ -40,7 +40,7 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 - `choice.testId` is optional. If present, the app uses `taskTargetNumbers[testId]` or falls back to `hostRating`.
 - Tested choices are gated: by default, 1+ success unlocks and reveals the target node; failure locks that choice for the current crawl and reveals nothing beyond it.
 - `choice.unlockSuccesses` is optional and raises the success threshold for harder routes. Omit it for the default 1-success gate.
-- Current app utility mapping recognizes starter IDs such as `logon`, `browsePublic`, `searchCustomer`, `staffRecords`, `alterStore`, `controlSlave`, `evadeTrace`, and `fightIc`.
+- Current app utility mapping recognizes starter IDs such as `logon`, `browsePublic`, `searchCustomer`, `staffRecords`, `alterStore`, `controlSlave`, `evadeTrace`, `fightIc`, `findUvSeam`, and `breachUv`.
 - Keep descriptions short enough for live-session scanning.
 
 ## Wiki update workflow

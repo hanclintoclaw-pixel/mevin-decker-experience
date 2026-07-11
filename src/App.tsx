@@ -251,6 +251,8 @@ function verbForChoice(choice: FlowChoice) {
   if (choice.testId === 'searchCustomer') return 'Search'
   if (choice.testId === 'staffRecords') return 'Open'
   if (choice.testId === 'controlSlave' || choice.testId === 'alterStore') return 'Command'
+  if (choice.testId === 'findUvSeam') return 'Find Seam'
+  if (choice.testId === 'breachUv') return 'Breach UV'
   if (choice.testId === 'evadeTrace') return 'Slip Away'
   if (choice.testId === 'fightIc') return 'Face Opposition'
   return 'Act'
@@ -266,6 +268,8 @@ function bestUtility(deck: DeckRuntime, testId?: string) {
     controlSlave: ['control', 'stealth'],
     evadeTrace: ['stealth', 'defense'],
     fightIc: ['attack', 'defense'],
+    findUvSeam: ['sensor', 'stealth', 'special'],
+    breachUv: ['stealth', 'special', 'utility'],
   }
   const wanted = categories[testId ?? ''] ?? ['utility']
   return deck.utilities.filter((utility) => wanted.includes(utility.category) && utility.status !== 'burned').reduce((best, utility) => Math.max(best, utility.rating), 0)
@@ -273,7 +277,7 @@ function bestUtility(deck: DeckRuntime, testId?: string) {
 
 function testPersona(testId?: string): PersonaKey {
   if (testId === 'evadeTrace' || testId === 'logon') return 'masking'
-  if (testId === 'controlSlave' || testId === 'alterStore') return 'masking'
+  if (testId === 'controlSlave' || testId === 'alterStore' || testId === 'breachUv') return 'masking'
   if (testId === 'fightIc') return 'bod'
   return 'sensors'
 }
