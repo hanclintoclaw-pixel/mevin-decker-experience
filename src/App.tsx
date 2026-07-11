@@ -84,7 +84,7 @@ interface PathEntry {
   dice?: number[]
   successes?: number
   requiredSuccesses?: number
-  outcome?: 'opened' | 'unlocked' | 'locked'
+  outcome?: 'opened' | 'unlocked' | 'locked' | 'gm'
   tallyIncrease?: number
   sheaf?: string[]
 }
@@ -94,6 +94,14 @@ interface ChoiceGateState {
   at: string
   successes?: number
   requiredSuccesses?: number
+}
+
+interface RollFeedback {
+  id: number
+  tone: 'success' | 'failure' | 'neutral'
+  icon: string
+  title: string
+  detail: string
 }
 
 interface CrawlState {
@@ -290,6 +298,8 @@ function App() {
   const [hostIndex, setHostIndex] = useState<HostIndexEntry[]>([])
   const [crawl, setCrawl] = useState<CrawlState>(initialState.crawl)
   const [message, setMessage] = useState('')
+  const [customAction, setCustomAction] = useState('')
+  const [rollFeedback, setRollFeedback] = useState<RollFeedback | undefined>()
   const [computerSkill, setComputerSkill] = useState(8)
   const [hackingPoolAvailable, setHackingPoolAvailable] = useState(6)
   const [hackingPoolCommit, setHackingPoolCommit] = useState(0)
@@ -341,6 +351,8 @@ function App() {
     setHost(nextHost)
     setCrawl(freshCrawl(nextHost))
     setSelectedChoiceIndex(0)
+    setCustomAction('')
+    setRollFeedback(undefined)
     setMessage(`Loaded ${nextHost.name} from ${source}.`)
   }
 
@@ -463,6 +475,14 @@ function App() {
       sheaf,
     }
 
+    setRollFeedback({
+      id: Date.now(),
+      tone: passed ? 'success' : 'failure',
+      icon: passed ? '✅' : '⛔',
+      title: passed ? (selectedChoice.testId ? 'Branch unlocked' : 'Branch opened') : 'Branch locked',
+      detail: selectedChoice.testId ? `${successes ?? 0}/${selectedRequiredSuccesses} successes vs TN ${targetNumber}` : selectedChoice.label,
+    })
+
     setCrawl((current) => {
       const currentRevealedNodeIds = current.revealedNodeIds ?? current.visitedNodeIds
       const gateState: ChoiceGateState = {
@@ -489,10 +509,35 @@ function App() {
     setHackingPoolCommit(0)
   }
 
+  function recordCustomAction() {
+    const trimmedAction = customAction.trim()
+    if (!trimmedAction) {
+      setMessage('Describe the custom Matrix action before recording it for GM adjudication.')
+      return
+    }
+    const entry: PathEntry = {
+      id: `path-${Date.now()}`,
+      at: new Date().toLocaleTimeString(),
+      from: currentNode.id,
+      verb: 'GM Call',
+      choice: trimmedAction,
+      to: currentNode.id,
+      outcome: 'gm',
+      tallyIncrease: 0,
+      sheaf: [],
+    }
+    setCrawl((current) => ({ ...current, path: [entry, ...current.path].slice(0, 60) }))
+    setRollFeedback({ id: Date.now(), tone: 'neutral', icon: '🎲', title: 'GM adjudication', detail: 'Custom RAW-style action recorded' })
+    setCustomAction('')
+    setMessage('Custom action recorded for GM adjudication; call for the RAW test or consequence that fits the table.')
+  }
+
   function resetCrawl() {
     setCrawl(freshCrawl(host))
     setSelectedChoiceIndex(0)
     setHackingPoolCommit(0)
+    setCustomAction('')
+    setRollFeedback(undefined)
   }
 
   return (
@@ -550,13 +595,23 @@ function App() {
           <p className="kicker">Current node</p>
           <h2>{currentNode.title}</h2>
           <p>{currentNode.description}</p>
+          {rollFeedback && <div key={rollFeedback.id} className={`roll-feedback ${rollFeedback.tone}`}><strong>{rollFeedback.icon} {rollFeedback.title}</strong><span>{rollFeedback.detail}</span></div>}
+          <div className="action-header"><span>Featured actions</span><small>{currentNode.choices.length} shown · scenario profiles may use 1-4 here</small></div>
           <div className="door-list verb-list">
-            {currentNode.choices.length === 0 && <p className="empty">No more doors from here.</p>}
+            {currentNode.choices.length === 0 && <p className="empty">No more featured actions from here.</p>}
             {currentNode.choices.map((choice, index) => {
               const gate = choiceGates[choiceKey(currentNode.id, index)]
               const isLocked = gate?.state === 'locked'
               return <button key={`${choice.label}-${choice.to}`} className={`${selectedChoiceIndex === index ? 'selected' : ''} ${isLocked ? 'locked' : ''}`} disabled={isLocked} onClick={() => setSelectedChoiceIndex(index)}><strong>{isLocked ? 'Locked' : verbForChoice(choice)}</strong><span>{isLocked ? 'Route burned by failed roll' : choice.label}</span>{choice.testId && <small>TN {host.taskTargetNumbers[choice.testId] ?? host.hostRating} · unlocks on {Math.max(1, choice.unlockSuccesses ?? 1)}+ success(es){gate?.state === 'unlocked' ? ' · unlocked' : ''}</small>}</button>
             })}
+          </div>
+          <div className="custom-action">
+            <label htmlFor="custom-action">Custom / RAW action</label>
+            <div className="custom-action-row">
+              <input id="custom-action" value={customAction} placeholder="Describe a Matrix action for GM adjudication" onChange={(event) => setCustomAction(event.target.value)} />
+              <button onClick={recordCustomAction}>Record GM Call</button>
+            </div>
+            <p className="micro">Use this when the decker wants a normal SR3-style operation outside the featured branches.</p>
           </div>
           {selectedChoice && <div className="roll-preview">
             <p className="kicker">Selected verb</p>
@@ -576,7 +631,7 @@ function App() {
         <aside className="log-panel">
           <h2>Path Log</h2>
           {crawl.path.length === 0 && <p className="empty">No choices yet.</p>}
-          {crawl.path.map((entry) => <article key={entry.id} className={entry.outcome === 'locked' ? 'failed-entry' : ''}><strong>{entry.verb}: {entry.choice}</strong><span>{entry.at} · {entry.from} {entry.outcome === 'locked' ? '↛' : '→'} {entry.to}</span>{entry.dice && <p>{entry.successes} success(es) vs TN {entry.targetNumber}; needed {entry.requiredSuccesses}; pool {entry.dicePool} dice, Hacking Pool spent {entry.hackingPoolSpent}; dice [{entry.dice.join(', ')}]; tally +{entry.tallyIncrease}; {entry.outcome === 'locked' ? 'route locked' : 'route unlocked'}</p>}{entry.sheaf && entry.sheaf.length > 0 && <p className="sheaf">Sheaf: {entry.sheaf.join(' · ')}</p>}</article>)}
+          {crawl.path.map((entry) => <article key={entry.id} className={entry.outcome === 'locked' ? 'failed-entry' : entry.outcome === 'gm' ? 'gm-entry' : ''}><strong>{entry.verb}: {entry.choice}</strong><span>{entry.at} · {entry.from} {entry.outcome === 'locked' ? '↛' : entry.outcome === 'gm' ? '◇' : '→'} {entry.to}</span>{entry.outcome === 'gm' && <p>Custom action recorded; GM chooses the RAW test, time cost, tally pressure, and fictional outcome.</p>}{entry.dice && <p>{entry.successes} success(es) vs TN {entry.targetNumber}; needed {entry.requiredSuccesses}; pool {entry.dicePool} dice, Hacking Pool spent {entry.hackingPoolSpent}; dice [{entry.dice.join(', ')}]; tally +{entry.tallyIncrease}; {entry.outcome === 'locked' ? 'route locked' : 'route unlocked'}</p>}{entry.sheaf && entry.sheaf.length > 0 && <p className="sheaf">Sheaf: {entry.sheaf.join(' · ')}</p>}</article>)}
         </aside>
       </section>
     </main>
