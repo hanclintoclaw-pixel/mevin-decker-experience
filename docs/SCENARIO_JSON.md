@@ -44,6 +44,7 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 - Tested choices are gated: by default, 1+ success unlocks and reveals the target node; failure locks that choice for the current crawl and reveals nothing beyond it.
 - When Security Tally crosses a `securitySheaf` threshold, the app pauses normal navigation with a checkpoint. The player can suppress/evade, fight, ignore, or jack out; ignored or failed checkpoints become active pressure that adds Tally risk to later tested actions.
 - A successful featured action should either reveal a new node or give a specific decker-facing result, such as customer files, shipping records, camera access, or a note to tell/ask the GM.
+- Permanent outcomes such as altered records, recurring orders, disabled devices, planted files, or changed access must tell the player to notify the GM. Current-crawl lockouts are not permanent by default; after in-world time passes, the GM may allow a reset and retry.
 - `choice.unlockSuccesses` is optional and raises the success threshold for harder routes. Omit it for the default 1-success gate.
 - `choice.targetNumber` and `choice.securityValue` are optional per-choice overrides for hidden/deeper layers that are harder than the outer Host default.
 - Current app utility mapping recognizes starter IDs such as `logon`, `browsePublic`, `searchCustomer`, `staffRecords`, `alterStore`, `controlSlave`, `evadeTrace`, `fightIc`, `findUvSeam`, and `breachUv`.
