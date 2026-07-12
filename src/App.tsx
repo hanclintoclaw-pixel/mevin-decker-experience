@@ -44,6 +44,21 @@ interface FlowNode {
   choices: FlowChoice[]
 }
 
+type ThreatType = 'probe' | 'trace' | 'scramble' | 'tarBaby' | 'killer' | 'blaster' | 'sparky' | 'black' | 'psychotropic' | 'generic'
+type RunEndKind = 'gracefulLogoff' | 'emergencyJackOut' | 'iconCrashed' | 'traceCompleted' | 'blackIcHarm' | 'psychotropicHarm' | 'objectiveComplete'
+
+interface SecuritySheafStep {
+  threshold: number
+  label: string
+  effect: string
+  encounter?: {
+    type?: ThreatType
+    rating?: number
+    terminalOnFail?: boolean
+    consequence?: string
+  }
+}
+
 interface HostProfile {
   schemaVersion?: string
   id: string
@@ -54,7 +69,7 @@ interface HostProfile {
   hostRating: number
   subsystem: Record<string, number>
   taskTargetNumbers: Record<string, number>
-  securitySheaf: Array<{ threshold: number; label: string; effect: string }>
+  securitySheaf: SecuritySheafStep[]
   sculpting: string
   notes: string
   flow: { startNodeId: string; nodes: FlowNode[] }
@@ -112,7 +127,25 @@ interface ThreatCheckpoint {
   label: string
   effect: string
   rating: number
+  type: ThreatType
+  consequence: string
+  terminalOnFail: boolean
   status: 'pending' | 'active'
+}
+
+interface RunOutcome {
+  id: string
+  title: string
+  detail: string
+  notifyGm: boolean
+}
+
+interface RunEndState {
+  id: string
+  kind: RunEndKind
+  title: string
+  detail: string
+  notifyGm: string
 }
 
 interface CrawlState {
@@ -122,6 +155,8 @@ interface CrawlState {
   choiceGates?: Record<string, ChoiceGateState>
   pendingThreats?: ThreatCheckpoint[]
   activeThreats?: ThreatCheckpoint[]
+  outcomes?: RunOutcome[]
+  runEnd?: RunEndState
   securityTally: number
   path: PathEntry[]
 }
@@ -212,7 +247,7 @@ function rollOpenD6(targetNumber: number) {
 }
 
 function freshCrawl(host: HostProfile): CrawlState {
-  return { currentNodeId: host.flow.startNodeId, visitedNodeIds: [host.flow.startNodeId], revealedNodeIds: [host.flow.startNodeId], choiceGates: {}, pendingThreats: [], activeThreats: [], securityTally: 0, path: [] }
+  return { currentNodeId: host.flow.startNodeId, visitedNodeIds: [host.flow.startNodeId], revealedNodeIds: [host.flow.startNodeId], choiceGates: {}, pendingThreats: [], activeThreats: [], outcomes: [], securityTally: 0, path: [] }
 }
 
 function unique(values: string[]) {
@@ -234,6 +269,8 @@ function normalizeCrawl(crawl: CrawlState, host: HostProfile): CrawlState {
     choiceGates: crawl.choiceGates ?? {},
     pendingThreats: crawl.pendingThreats ?? [],
     activeThreats: crawl.activeThreats ?? [],
+    outcomes: crawl.outcomes ?? [],
+    runEnd: crawl.runEnd,
     path: crawl.path ?? [],
   }
 }
@@ -305,6 +342,84 @@ function testPersona(testId?: string): PersonaKey {
   return 'sensors'
 }
 
+function threatTypeFromLabel(label: string): ThreatType {
+  const lower = label.toLowerCase()
+  if (lower.includes('psychotropic')) return 'psychotropic'
+  if (lower.includes('black')) return 'black'
+  if (lower.includes('trace')) return 'trace'
+  if (lower.includes('scramble')) return 'scramble'
+  if (lower.includes('tar')) return 'tarBaby'
+  if (lower.includes('killer')) return 'killer'
+  if (lower.includes('blaster')) return 'blaster'
+  if (lower.includes('sparky')) return 'sparky'
+  if (lower.includes('probe') || lower.includes('scout')) return 'probe'
+  return 'generic'
+}
+
+function consequenceForThreat(type: ThreatType, label: string) {
+  const consequences: Record<ThreatType, string> = {
+    probe: `${label}: host has a better read on the icon signature. Notify the GM if this remains active at run end.`,
+    trace: `${label}: trace risk is live. Notify the GM; the decker may be locatable if this is ignored or the run ends under pressure.`,
+    scramble: `${label}: records/paydata may be corrupted, partial, or noisy until cleared. Notify the GM before trusting recovered data.`,
+    tarBaby: `${label}: movement or clean logoff may be impaired. Notify the GM if the decker exits with this still active.`,
+    killer: `${label}: ICON/deck damage risk. A failed checkpoint can crash the run.`,
+    blaster: `${label}: destructive IC pressure. A failed checkpoint can crash the run or damage the deck.`,
+    sparky: `${label}: hardware stress risk. Notify the GM if this hits or remains active at run end.`,
+    black: `${label}: black IC biofeedback risk. Failed handling can end the run with harm requiring GM adjudication.`,
+    psychotropic: `${label}: psychotropic pressure risk. Failed handling can create a mental/behavioral consequence requiring GM adjudication.`,
+    generic: `${label}: active IC/security pressure. Notify the GM if it remains active at run end.`,
+  }
+  return consequences[type]
+}
+
+function terminalKindForThreat(type: ThreatType): RunEndKind | undefined {
+  if (type === 'trace') return 'traceCompleted'
+  if (type === 'black') return 'blackIcHarm'
+  if (type === 'psychotropic') return 'psychotropicHarm'
+  if (type === 'killer' || type === 'blaster' || type === 'sparky') return 'iconCrashed'
+  return undefined
+}
+
+function outcomeForNode(node: FlowNode): RunOutcome | undefined {
+  if (!['reward', 'gm-reward', 'paydata', 'permanent-outcome', 'major-reward'].includes(node.kind)) return undefined
+  return {
+    id: node.id,
+    title: node.title,
+    detail: node.description,
+    notifyGm: node.kind === 'gm-reward' || node.kind === 'permanent-outcome' || node.kind === 'major-reward' || node.kind === 'paydata',
+  }
+}
+
+function runEndForNode(node: FlowNode, activeThreats: ThreatCheckpoint[]): RunEndState | undefined {
+  if (node.kind !== 'exit' && node.choices.length > 0) return undefined
+  return {
+    id: `run-end-${Date.now()}`,
+    kind: node.kind === 'exit' ? 'gracefulLogoff' : 'objectiveComplete',
+    title: node.kind === 'exit' ? 'Graceful Logoff' : 'Run Objective Complete',
+    detail: node.description,
+    notifyGm: activeThreats.length > 0 ? 'Tell the GM the run ended while IC/security pressure was still active.' : 'Tell the GM the final recovered data, permanent changes, and clean-exit status.',
+  }
+}
+
+function runEndForThreat(threat: ThreatCheckpoint, kind: RunEndKind): RunEndState {
+  const titles: Record<RunEndKind, string> = {
+    gracefulLogoff: 'Graceful Logoff',
+    emergencyJackOut: 'Emergency Jack Out',
+    iconCrashed: 'ICON Crashed / Deck Damaged',
+    traceCompleted: 'Trace Completed',
+    blackIcHarm: 'Black IC Harm',
+    psychotropicHarm: 'Psychotropic IC Consequence',
+    objectiveComplete: 'Run Objective Complete',
+  }
+  return {
+    id: `run-end-${Date.now()}`,
+    kind,
+    title: titles[kind],
+    detail: threat.consequence,
+    notifyGm: `RUN OVER — alert the GM to final outcome: ${titles[kind]}. ${threat.consequence}`,
+  }
+}
+
 function App() {
   const [initialState] = useState(loadStoredAppState)
   const [deck, setDeck] = useState<DeckRuntime>(initialState.deck)
@@ -324,6 +439,8 @@ function App() {
   const choiceGates = crawl.choiceGates ?? EMPTY_CHOICE_GATES
   const pendingThreat = crawl.pendingThreats?.[0]
   const activeThreats = crawl.activeThreats ?? []
+  const outcomes = crawl.outcomes ?? []
+  const runEnd = crawl.runEnd
   const nextSheaf = host.securitySheaf.find((step) => step.threshold > crawl.securityTally)
   const selectedChoice = currentNode.choices[selectedChoiceIndex]
   const selectedChoiceGate = selectedChoice ? choiceGates[choiceKey(currentNode.id, selectedChoiceIndex)] : undefined
@@ -516,15 +633,25 @@ function App() {
       const existingThreatIds = new Set([...(current.pendingThreats ?? []), ...(current.activeThreats ?? [])].map((threat) => threat.id))
       const newThreats = host.securitySheaf
         .filter((step) => step.threshold > current.securityTally && step.threshold <= after)
-        .map((step) => ({
-          id: `threat-${step.threshold}-${step.label}`,
-          threshold: step.threshold,
-          label: step.label,
-          effect: step.effect,
-          rating: Math.max(selectedChoice.securityValue ?? host.securityValue, Math.ceil(step.threshold / 2)),
-          status: 'pending' as const,
-        }))
+        .map((step) => {
+          const type = step.encounter?.type ?? threatTypeFromLabel(step.label)
+          return {
+            id: `threat-${step.threshold}-${step.label}`,
+            threshold: step.threshold,
+            label: step.label,
+            effect: step.effect,
+            rating: step.encounter?.rating ?? Math.max(selectedChoice.securityValue ?? host.securityValue, Math.ceil(step.threshold / 2)),
+            type,
+            consequence: step.encounter?.consequence ?? consequenceForThreat(type, step.label),
+            terminalOnFail: step.encounter?.terminalOnFail ?? Boolean(terminalKindForThreat(type)),
+            status: 'pending' as const,
+          }
+        })
         .filter((threat) => !existingThreatIds.has(threat.id))
+      const destinationNode = host.flow.nodes.find((node) => node.id === selectedChoice.to)
+      const nodeOutcome = passed && destinationNode ? outcomeForNode(destinationNode) : undefined
+      const nextOutcomes = nodeOutcome && !(current.outcomes ?? []).some((existing) => existing.id === nodeOutcome.id) ? [...(current.outcomes ?? []), nodeOutcome] : (current.outcomes ?? [])
+      const runEnd = passed && destinationNode ? runEndForNode(destinationNode, current.activeThreats ?? []) : undefined
       return {
         currentNodeId: passed ? selectedChoice.to : from,
         visitedNodeIds: passed ? unique([...current.visitedNodeIds, selectedChoice.to]) : current.visitedNodeIds,
@@ -532,6 +659,8 @@ function App() {
         choiceGates: nextChoiceGates,
         pendingThreats: [...(current.pendingThreats ?? []), ...newThreats],
         activeThreats: current.activeThreats ?? [],
+        outcomes: nextOutcomes,
+        runEnd: runEnd ?? current.runEnd,
         securityTally: after,
         path: [entry, ...current.path].slice(0, 60),
       }
@@ -574,17 +703,27 @@ function App() {
     const verb = action === 'suppress' ? 'Suppress IC' : action === 'fight' ? 'Cybercombat' : 'Jack Out'
     const entry = threatEntry(pendingThreat, verb, pendingThreat.label, dice, successes, targetNumber, requiredSuccesses, tallyIncrease)
     const logoffNode = host.flow.nodes.find((node) => node.id === 'logoff')
+    const failedTerminalKind = !passed && pendingThreat.terminalOnFail ? terminalKindForThreat(pendingThreat.type) : undefined
 
     setCrawl((current) => {
       const remainingThreats = (current.pendingThreats ?? []).slice(1)
-      const activatedThreat = passed ? [] : [{ ...pendingThreat, status: 'active' as const }]
+      const activatedThreat = passed || failedTerminalKind ? [] : [{ ...pendingThreat, status: 'active' as const }]
+      const emergencyJackOut = passed && action === 'jackout'
+      const runEnd = failedTerminalKind ? runEndForThreat(pendingThreat, failedTerminalKind) : emergencyJackOut ? {
+        id: `run-end-${Date.now()}`,
+        kind: 'emergencyJackOut' as const,
+        title: 'Emergency Jack Out',
+        detail: `${pendingThreat.label} was handled by cutting the run short.`,
+        notifyGm: 'RUN OVER — alert the GM: emergency jack out before completing a graceful host logoff.',
+      } : current.runEnd
       return {
         ...current,
-        currentNodeId: passed && action === 'jackout' && logoffNode ? logoffNode.id : current.currentNodeId,
-        visitedNodeIds: passed && action === 'jackout' && logoffNode ? unique([...current.visitedNodeIds, logoffNode.id]) : current.visitedNodeIds,
-        revealedNodeIds: passed && action === 'jackout' && logoffNode ? unique([...(current.revealedNodeIds ?? current.visitedNodeIds), logoffNode.id]) : current.revealedNodeIds,
+        currentNodeId: emergencyJackOut && logoffNode ? logoffNode.id : current.currentNodeId,
+        visitedNodeIds: emergencyJackOut && logoffNode ? unique([...current.visitedNodeIds, logoffNode.id]) : current.visitedNodeIds,
+        revealedNodeIds: emergencyJackOut && logoffNode ? unique([...(current.revealedNodeIds ?? current.visitedNodeIds), logoffNode.id]) : current.revealedNodeIds,
         pendingThreats: remainingThreats,
         activeThreats: [...(current.activeThreats ?? []), ...activatedThreat],
+        runEnd,
         securityTally: current.securityTally + tallyIncrease,
         path: [entry, ...current.path].slice(0, 60),
       }
@@ -603,12 +742,16 @@ function App() {
   function ignoreThreatCheckpoint() {
     if (!pendingThreat) return
     const entry = threatEntry(pendingThreat, 'Ignore IC', `${pendingThreat.label} stays active`)
-    setCrawl((current) => ({
-      ...current,
-      pendingThreats: (current.pendingThreats ?? []).slice(1),
-      activeThreats: [...(current.activeThreats ?? []), { ...pendingThreat, status: 'active' }],
-      path: [entry, ...current.path].slice(0, 60),
-    }))
+    setCrawl((current) => {
+      const terminalKind = pendingThreat.type === 'trace' ? terminalKindForThreat(pendingThreat.type) : undefined
+      return {
+        ...current,
+        pendingThreats: (current.pendingThreats ?? []).slice(1),
+        activeThreats: terminalKind ? (current.activeThreats ?? []) : [...(current.activeThreats ?? []), { ...pendingThreat, status: 'active' }],
+        runEnd: terminalKind ? runEndForThreat(pendingThreat, terminalKind) : current.runEnd,
+        path: [entry, ...current.path].slice(0, 60),
+      }
+    })
     setRollFeedback({ id: Date.now(), tone: 'neutral', icon: '👁️', title: `${pendingThreat.label} ignored`, detail: 'It stays active and adds pressure to future tested actions.' })
     setMessage(`${pendingThreat.label} is now active. Continuing under pressure.`)
   }
@@ -685,8 +828,8 @@ function App() {
       <section className="status-grid">
         <article><span>Deck</span><strong>{deck.sourceName}</strong><small>{deck.handle} · DF {deck.detectionFactor}</small></article>
         <article><span>Matrix host</span><strong>{host.name}</strong><small>{host.securityCode.toUpperCase()}-{host.securityValue}</small></article>
-        <article><span>Tally</span><strong>{crawl.securityTally}</strong><small>{pendingThreat ? `Checkpoint: ${pendingThreat.label}` : nextSheaf ? `Next: ${nextSheaf.threshold} ${nextSheaf.label}` : 'End / GM escalation'}</small></article>
-        <article><span>Location</span><strong>{currentNode.title}</strong><small>{activeThreats.length ? `${activeThreats.length} active threat(s)` : currentNode.kind}</small></article>
+        <article><span>Tally</span><strong>{crawl.securityTally}</strong><small>{runEnd ? 'Run over' : pendingThreat ? `Checkpoint: ${pendingThreat.label}` : nextSheaf ? `Next: ${nextSheaf.threshold} ${nextSheaf.label}` : 'End / GM escalation'}</small></article>
+        <article><span>Location</span><strong>{runEnd ? runEnd.title : currentNode.title}</strong><small>{activeThreats.length ? `${activeThreats.length} active threat(s)` : currentNode.kind}</small></article>
       </section>
 
       {activeThreats.length > 0 && <section className="active-threats"><span>Active pressure</span>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Rating {threat.rating} · +1 Tally pressure on tested actions</small></article>)}</section>}
@@ -702,7 +845,20 @@ function App() {
           <h2>{currentNode.title}</h2>
           <p>{currentNode.description}</p>
           {rollFeedback && <div key={rollFeedback.id} className={`roll-feedback ${rollFeedback.tone}`}><strong>{rollFeedback.icon} {rollFeedback.title}</strong><span>{rollFeedback.detail}</span></div>}
-          {pendingThreat ? <div className="threat-checkpoint">
+          {runEnd ? <div className="run-end-card">
+            <p className="kicker">RUN OVER — ALERT THE GM</p>
+            <h3>{runEnd.title}</h3>
+            <p>{runEnd.detail}</p>
+            <p className="notice">{runEnd.notifyGm}</p>
+            <div className="run-summary-grid">
+              <article><span>Final Tally</span><strong>{crawl.securityTally}</strong></article>
+              <article><span>Recovered / changed</span><strong>{outcomes.length}</strong></article>
+              <article><span>Active threats</span><strong>{activeThreats.length}</strong></article>
+            </div>
+            {outcomes.length > 0 && <div className="run-summary-list"><h4>Tell the GM / note for later</h4>{outcomes.map((outcome) => <article key={outcome.id}><strong>{outcome.title}</strong><p>{outcome.detail}</p>{outcome.notifyGm && <small>Notify the GM.</small>}</article>)}</div>}
+            {activeThreats.length > 0 && <div className="run-summary-list danger"><h4>Unresolved IC / consequences</h4>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><p>{threat.consequence}</p></article>)}</div>}
+            <button className="roll-button" onClick={exportCrawl}>Export final log</button>
+          </div> : pendingThreat ? <div className="threat-checkpoint">
             <p className="kicker">Security checkpoint</p>
             <h3>{pendingThreat.label}</h3>
             <p>{pendingThreat.effect}</p>

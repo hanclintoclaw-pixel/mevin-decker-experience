@@ -15,7 +15,7 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
   "hostRating": 4,
   "subsystem": { "access": 4, "control": 3, "index": 4, "files": 4, "slave": 3 },
   "taskTargetNumbers": { "logon": 4, "browsePublic": 4 },
-  "securitySheaf": [{ "threshold": 2, "label": "Probe IC", "effect": "Host starts checking the decker icon." }],
+  "securitySheaf": [{ "threshold": 2, "label": "Probe IC", "effect": "Host starts checking the decker icon.", "encounter": { "type": "probe", "rating": 4 } }],
   "sculpting": "Short feel/imagery for the fictional Matrix host.",
   "notes": "GM-facing table notes.",
   "flow": {
@@ -43,6 +43,8 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 - The app also provides a custom/RAW action lane at every node for GM-adjudicated operations outside the featured choices.
 - Tested choices are gated: by default, 1+ success unlocks and reveals the target node; failure locks that choice for the current crawl and reveals nothing beyond it.
 - When Security Tally crosses a `securitySheaf` threshold, the app pauses normal navigation with a checkpoint. The player can suppress/evade, fight, ignore, or jack out; ignored or failed checkpoints become active pressure that adds Tally risk to later tested actions.
+- `securitySheaf[].encounter` is optional. Without it, the app infers IC type from the label (`Trace`, `Scramble`, `Tar Baby`, `Killer`, `Black`, `Psychotropic`, etc.). Encounter metadata can override `type`, `rating`, `terminalOnFail`, and GM-facing `consequence` text.
+- Runs now end explicitly through graceful logoff, emergency jack out, objective completion, trace completion, ICON/deck crash, black IC harm, or psychotropic consequence. The final card tells the player to alert the GM and summarizes recovered outcomes and unresolved threats.
 - A successful featured action should either reveal a new node or give a specific decker-facing result, such as customer files, shipping records, camera access, or a note to tell/ask the GM.
 - Permanent outcomes such as altered records, recurring orders, disabled devices, planted files, or changed access must tell the player to notify the GM. Current-crawl lockouts are not permanent by default; after in-world time passes, the GM may allow a reset and retry.
 - `choice.unlockSuccesses` is optional and raises the success threshold for harder routes. Omit it for the default 1-success gate.
