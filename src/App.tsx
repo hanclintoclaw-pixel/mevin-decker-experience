@@ -356,6 +356,32 @@ function threatTypeFromLabel(label: string): ThreatType {
   return 'generic'
 }
 
+function descriptionForThreat(type: ThreatType) {
+  const descriptions: Record<ThreatType, string> = {
+    probe: 'Probe/Scout IC studies your icon, credentials, and behavior. If left active, the host may identify your signature or make future security response more precise.',
+    trace: 'Trace IC tries to connect your icon to a route, jackpoint, address, or other real-world handle. Ignoring it can end the run with a trace-completed outcome.',
+    scramble: 'Scramble IC interferes with files, records, maps, and paydata. If left active, recovered data may be partial, corrupted, noisy, or require GM confirmation before it can be trusted.',
+    tarBaby: 'Tar Baby-style IC tries to hold you in place. If left active, movement, clean logoff, or retreat may be harder and should be reported at run end.',
+    killer: 'Killer IC attacks the icon directly. Failed handling can crash the icon, damage the deck/persona, and end the run.',
+    blaster: 'Blaster IC is destructive anti-intrusion pressure. Failed handling can damage the deck, crash the icon, and end the run.',
+    sparky: 'Sparky IC stresses connected hardware and interface systems. Failed handling can crash the run or create repair/gear consequences for the GM to adjudicate.',
+    black: 'Black IC is biofeedback danger. Failed handling can end the run with harm that must be resolved with the GM.',
+    psychotropic: 'Psychotropic IC attacks perception, emotion, memory, or behavior. Failed handling can create a lasting mental or behavioral consequence for GM adjudication.',
+    generic: 'This is active host security pressure. If left active, it increases risk on future tested actions and should be reported if still active when the run ends.',
+  }
+  return descriptions[type]
+}
+
+function actionDetailsForThreat(threat: ThreatCheckpoint) {
+  const terminalKind = terminalKindForThreat(threat.type)
+  return {
+    suppress: `Roll vs TN ${threat.rating}, need 1 success. On success, clear this checkpoint and continue. On failure, it becomes active pressure${threat.terminalOnFail && terminalKind ? ' or may end the run for severe IC' : ''}.`,
+    fight: `Roll vs TN ${threat.rating}, need 2 successes. Best for destructive IC, but failure can leave it active${threat.terminalOnFail && terminalKind ? ' or crash/end the run' : ''}.`,
+    ignore: threat.type === 'trace' ? 'Do not roll. Trace completes immediately and the run ends; alert the GM.' : 'Do not roll. Continue the run, but this IC stays active and adds +1 Tally pressure to future tested actions.',
+    jackout: `Roll vs TN ${Math.max(4, threat.rating - 1)}, need 1 success. On success, end the run with Emergency Jack Out. On failure, the IC stays dangerous${threat.terminalOnFail && terminalKind ? ' and may force its terminal consequence' : ''}.`,
+  }
+}
+
 function consequenceForThreat(type: ThreatType, label: string) {
   const consequences: Record<ThreatType, string> = {
     probe: `${label}: host has a better read on the icon signature. Notify the GM if this remains active at run end.`,
@@ -449,6 +475,7 @@ function App() {
   const selectedUtility = selectedChoice ? bestUtility(deck, selectedChoice.testId) : 0
   const selectedTargetNumber = selectedChoice?.testId ? (selectedChoice.targetNumber ?? host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating) : undefined
   const selectedDicePool = selectedChoice?.testId ? Math.max(1, computerSkill + Math.min(hackingPoolCommit, hackingPoolAvailable)) : undefined
+  const pendingThreatActionDetails = pendingThreat ? actionDetailsForThreat(pendingThreat) : undefined
 
   useEffect(() => {
     const selectedKey = choiceKey(currentNode.id, selectedChoiceIndex)
@@ -832,7 +859,7 @@ function App() {
         <article><span>Location</span><strong>{runEnd ? runEnd.title : currentNode.title}</strong><small>{activeThreats.length ? `${activeThreats.length} active threat(s)` : currentNode.kind}</small></article>
       </section>
 
-      {activeThreats.length > 0 && <section className="active-threats"><span>Active pressure</span>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Rating {threat.rating} · +1 Tally pressure on tested actions</small></article>)}</section>}
+      {activeThreats.length > 0 && <section className="active-threats"><span>Active pressure</span>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Rating {threat.rating} · {descriptionForThreat(threat.type)}</small></article>)}</section>}
 
       <section className="crawl-layout">
         <aside className="node-map">
@@ -862,17 +889,22 @@ function App() {
             <p className="kicker">Security checkpoint</p>
             <h3>{pendingThreat.label}</h3>
             <p>{pendingThreat.effect}</p>
-            <p className="roll-formula">Rating {pendingThreat.rating}. Normal host choices pause until you handle this alert. Suppress/Evade needs 1 success, Fight needs 2 successes, and Jack Out attempts a safer exit. Ignoring it keeps the threat active and adds +1 Tally pressure to future tested actions.</p>
+            <div className="ic-context">
+              <strong>{pendingThreat.type} IC / security behavior</strong>
+              <span>{descriptionForThreat(pendingThreat.type)}</span>
+              <small>{pendingThreat.consequence}</small>
+            </div>
+            <p className="roll-formula">Rating {pendingThreat.rating}. Normal host choices pause until you handle this alert. Choose whether to clear it, fight it, carry it as active pressure, or end the run by jacking out.</p>
             <div className="roll-grid">
               <label>Computer skill<input type="number" min="1" value={computerSkill} onChange={(event) => setComputerSkill(Number(event.target.value))} /></label>
               <label>Hacking Pool available<input type="number" min="0" value={hackingPoolAvailable} onChange={(event) => setHackingPoolAvailable(Number(event.target.value))} /></label>
               <label>Hacking Pool for this roll<input type="number" min="0" max={hackingPoolAvailable} value={hackingPoolCommit} onChange={(event) => setHackingPoolCommit(Number(event.target.value))} /></label>
             </div>
             <div className="threat-actions">
-              <button onClick={() => rollThreatCheckpoint('suppress')}><strong>Suppress / Evade</strong><span>Roll vs TN {pendingThreat.rating}</span></button>
-              <button onClick={() => rollThreatCheckpoint('fight')}><strong>Fight IC</strong><span>Roll vs TN {pendingThreat.rating}, need 2</span></button>
-              <button onClick={ignoreThreatCheckpoint}><strong>Ignore and Continue</strong><span>Threat becomes active pressure</span></button>
-              <button onClick={() => rollThreatCheckpoint('jackout')}><strong>Jack Out</strong><span>Roll vs TN {Math.max(4, pendingThreat.rating - 1)}</span></button>
+              <button onClick={() => rollThreatCheckpoint('suppress')}><strong>Suppress / Evade</strong><span>{pendingThreatActionDetails?.suppress}</span></button>
+              <button onClick={() => rollThreatCheckpoint('fight')}><strong>Fight IC</strong><span>{pendingThreatActionDetails?.fight}</span></button>
+              <button onClick={ignoreThreatCheckpoint}><strong>Ignore and Continue</strong><span>{pendingThreatActionDetails?.ignore}</span></button>
+              <button onClick={() => rollThreatCheckpoint('jackout')}><strong>Jack Out</strong><span>{pendingThreatActionDetails?.jackout}</span></button>
             </div>
           </div> : <>
             <div className="action-header"><span>Featured actions</span><small>{currentNode.choices.length} shown · scenario profiles may use 1-4 here</small></div>

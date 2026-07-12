@@ -212,10 +212,22 @@ h2 { margin: 0 0 0.8rem; }
   box-shadow: 0 0 40px rgba(255, 111, 166, 0.18);
 }
 .threat-checkpoint h3 { margin: 0 0 0.5rem; font-size: clamp(1.7rem, 4vw, 3rem); }
+.ic-context {
+  border: 1px solid rgba(255, 189, 89, 0.30);
+  background: rgba(255, 189, 89, 0.08);
+  border-radius: 16px;
+  padding: 0.85rem;
+  margin: 0.75rem 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.ic-context strong { color: #ffbd59; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem; }
+.ic-context span { color: #f5f0ff; line-height: 1.4; }
+.ic-context small { color: #ffb3cf; line-height: 1.35; }
 .threat-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-top: 0.9rem; }
 .threat-actions button { display: grid; gap: 0.35rem; text-align: left; align-content: start; }
 .threat-actions button strong { color: #f5f0ff; }
-.threat-actions button span { color: #ffb3cf; }
+.threat-actions button span { color: #ffb3cf; font-size: 0.82rem; line-height: 1.35; }
 
 .roll-preview {
   border: 1px solid rgba(210, 140, 255, 0.24);
