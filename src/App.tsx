@@ -176,6 +176,30 @@ interface CrawlState {
   path: PathEntry[]
 }
 
+interface HostMapNode {
+  node: FlowNode
+  x: number
+  y: number
+  depth: number
+  hiddenIndex: number
+}
+
+interface HostMapEdge {
+  from: string
+  to: string
+  label: string
+  fromX: number
+  fromY: number
+  toX: number
+  toY: number
+}
+
+interface HostMapLayout {
+  nodes: HostMapNode[]
+  edges: HostMapEdge[]
+  heightRem: number
+}
+
 const EMPTY_CHOICE_GATES: Record<string, ChoiceGateState> = {}
 const EMPTY_THREATS: ThreatCheckpoint[] = []
 const EMPTY_OUTCOMES: RunOutcome[] = []
@@ -282,6 +306,75 @@ function unique(values: string[]) {
 
 function choiceKey(nodeId: string, choiceIndex: number) {
   return `${nodeId}:${choiceIndex}`
+}
+
+function buildHostMapLayout(host: HostProfile): HostMapLayout {
+  const nodeOrder = new Map(host.flow.nodes.map((node, index) => [node.id, index]))
+  const nodeById = new Map(host.flow.nodes.map((node) => [node.id, node]))
+  const depthById = new Map<string, number>([[host.flow.startNodeId, 0]])
+  const queue = [host.flow.startNodeId]
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift()
+    if (!nodeId) continue
+    const node = nodeById.get(nodeId)
+    if (!node) continue
+    const nextDepth = (depthById.get(nodeId) ?? 0) + 1
+    for (const choice of node.choices) {
+      if (!nodeById.has(choice.to)) continue
+      const existingDepth = depthById.get(choice.to)
+      if (existingDepth !== undefined && existingDepth <= nextDepth) continue
+      depthById.set(choice.to, nextDepth)
+      queue.push(choice.to)
+    }
+  }
+
+  const fallbackDepth = Math.max(0, ...depthById.values()) + 1
+  for (const node of host.flow.nodes) {
+    if (!depthById.has(node.id)) depthById.set(node.id, fallbackDepth)
+  }
+
+  const levels = new Map<number, FlowNode[]>()
+  for (const node of host.flow.nodes) {
+    const depth = depthById.get(node.id) ?? fallbackDepth
+    levels.set(depth, [...(levels.get(depth) ?? []), node])
+  }
+
+  const maxDepth = Math.max(0, ...levels.keys())
+  const hiddenIndexes = new Map<string, number>()
+  let nextHiddenIndex = 1
+  const mapNodes: HostMapNode[] = [...levels.entries()].flatMap(([depth, nodes]) => {
+    const sortedNodes = [...nodes].sort((left, right) => (nodeOrder.get(left.id) ?? 0) - (nodeOrder.get(right.id) ?? 0))
+    return sortedNodes.map((node, index) => {
+      hiddenIndexes.set(node.id, nextHiddenIndex)
+      nextHiddenIndex += 1
+      return {
+        node,
+        depth,
+        hiddenIndex: hiddenIndexes.get(node.id) ?? index + 1,
+        x: ((index + 1) / (sortedNodes.length + 1)) * 100,
+        y: ((depth + 1) / (maxDepth + 2)) * 100,
+      }
+    })
+  })
+
+  const mapNodeById = new Map(mapNodes.map((mapNode) => [mapNode.node.id, mapNode]))
+  const edgeKeys = new Set<string>()
+  const edges: HostMapEdge[] = []
+  for (const node of host.flow.nodes) {
+    const from = mapNodeById.get(node.id)
+    if (!from) continue
+    for (const choice of node.choices) {
+      const to = mapNodeById.get(choice.to)
+      if (!to || from.node.id === to.node.id) continue
+      const key = `${from.node.id}->${to.node.id}`
+      if (edgeKeys.has(key)) continue
+      edgeKeys.add(key)
+      edges.push({ from: from.node.id, to: to.node.id, label: choice.label, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y })
+    }
+  }
+
+  return { nodes: mapNodes, edges, heightRem: Math.max(24, (maxDepth + 2) * 8) }
 }
 
 function normalizeCrawl(crawl: CrawlState, host: HostProfile): CrawlState {
@@ -621,7 +714,9 @@ function App() {
   const [computerSkill, setComputerSkill] = useState(8)
   const [hackingPoolAvailable, setHackingPoolAvailable] = useState(6)
   const [selectedChoiceIndex, setSelectedChoiceIndex] = useState(0)
-  const currentNode = useMemo(() => host.flow.nodes.find((node) => node.id === crawl.currentNodeId) ?? host.flow.nodes[0], [host, crawl.currentNodeId])
+  const hostNodeById = useMemo(() => new Map(host.flow.nodes.map((node) => [node.id, node])), [host])
+  const hostMap = useMemo(() => buildHostMapLayout(host), [host])
+  const currentNode = useMemo(() => hostNodeById.get(crawl.currentNodeId) ?? host.flow.nodes[0], [host, hostNodeById, crawl.currentNodeId])
   const revealedNodeIds = crawl.revealedNodeIds ?? crawl.visitedNodeIds
   const choiceGates = crawl.choiceGates ?? EMPTY_CHOICE_GATES
   const pendingThreat = crawl.pendingThreats?.[0]
@@ -1061,11 +1156,6 @@ function App() {
       {(dfPoolReserve > 0 || poolLocks.length > 0) && <section className="pool-allocations"><span>Pool allocations</span>{dfPoolReserve > 0 && <article><strong>Detection Factor reserve</strong><small>{dfPoolReserve} Hacking Pool dice reserved · effective DF {effectiveDetectionFactor}</small></article>}{poolLocks.map((lock) => <article key={lock.id}><strong>{lock.reason}: {lock.label}</strong><small>{lock.dice} Hacking Pool die/dice tied up until {lock.sourceThreatId ? 'the IC returns' : 'reset/end'}</small></article>)}</section>}
 
       <section className="crawl-layout">
-        <aside className="node-map">
-          {host.flow.nodes.filter((node) => revealedNodeIds.includes(node.id)).map((node) => <button key={node.id} className={`${crawl.currentNodeId === node.id ? 'current' : ''} ${crawl.visitedNodeIds.includes(node.id) ? 'visited' : ''}`} onClick={() => setCrawl((current) => ({ ...current, currentNodeId: node.id, visitedNodeIds: unique([...current.visitedNodeIds, node.id]) }))}>{node.title}</button>)}
-          {host.flow.nodes.filter((node) => !revealedNodeIds.includes(node.id)).map((node, index) => <button key={node.id} className="unrevealed" disabled>Unknown route {index + 1}</button>)}
-        </aside>
-
         <section className="node-card">
           <p className="kicker">Current node</p>
           <h2>{currentNode.title}</h2>
@@ -1121,7 +1211,12 @@ function App() {
               {currentNode.choices.map((choice, index) => {
                 const gate = choiceGates[choiceKey(currentNode.id, index)]
                 const isLocked = gate?.state === 'locked'
-                return <button key={`${choice.label}-${choice.to}`} className={`${selectedChoiceIndex === index ? 'selected' : ''} ${isLocked ? 'locked' : ''}`} disabled={isLocked} onClick={() => setSelectedChoiceIndex(index)}><strong>{isLocked ? 'Locked' : verbForChoice(choice)}</strong><span>{isLocked ? 'Route burned by failed roll' : choice.label}</span>{choice.testId && <small>TN {choice.targetNumber ?? host.taskTargetNumbers[choice.testId] ?? host.hostRating} · unlocks on {Math.max(1, choice.unlockSuccesses ?? 1)}+ success(es){gate?.state === 'unlocked' ? ' · unlocked' : ''}</small>}</button>
+                const destination = hostNodeById.get(choice.to)
+                const destinationVisited = destination ? crawl.visitedNodeIds.includes(destination.id) : false
+                const destinationRevealed = destination ? revealedNodeIds.includes(destination.id) : false
+                const locationState = destinationVisited ? 'found' : destinationRevealed ? 'revealed' : 'hidden'
+                const locationLabel = destinationVisited ? 'Found location' : destinationRevealed ? 'Revealed / not visited' : 'Hidden zone'
+                return <button key={`${choice.label}-${choice.to}`} className={`${selectedChoiceIndex === index ? 'selected' : ''} ${isLocked ? 'locked' : ''} route-${locationState}`} disabled={isLocked} onClick={() => setSelectedChoiceIndex(index)}><strong>{isLocked ? 'Locked' : verbForChoice(choice)}</strong><span>{isLocked ? 'Route burned by failed roll' : choice.label}</span><small className={`location-state ${locationState}`}>{locationLabel}</small>{choice.testId && <small>TN {choice.targetNumber ?? host.taskTargetNumbers[choice.testId] ?? host.hostRating} · unlocks on {Math.max(1, choice.unlockSuccesses ?? 1)}+ success(es){gate?.state === 'unlocked' ? ' · unlocked' : ''}</small>}</button>
               })}
             </div>
             {selectedChoice && <div className="roll-preview">
@@ -1145,6 +1240,52 @@ function App() {
           {crawl.path.length === 0 && <p className="empty">No choices yet.</p>}
           {crawl.path.map((entry) => <article key={entry.id} className={entry.outcome === 'locked' ? 'failed-entry' : entry.outcome === 'gm' ? 'gm-entry' : entry.outcome === 'threat' ? 'threat-entry' : ''}><strong>{entry.verb}: {entry.choice}</strong><span>{entry.at} · {entry.from} {entry.outcome === 'locked' ? '↛' : entry.outcome === 'gm' ? '◇' : entry.outcome === 'threat' ? '⚠' : '→'} {entry.to}</span>{entry.outcome === 'gm' && <p>Custom action recorded; GM chooses the RAW test, time cost, tally pressure, and fictional outcome.</p>}{entry.dice && <p>{entry.successes} success(es) vs TN {entry.targetNumber}; needed {entry.requiredSuccesses}; pool {entry.dicePool} dice, Hacking Pool included {entry.hackingPoolIncluded}; dice [{entry.dice.join(', ')}]; tally +{entry.tallyIncrease}; {entry.outcome === 'locked' ? 'route locked' : entry.outcome === 'threat' ? 'checkpoint action' : 'route unlocked'}</p>}{entry.sheaf && entry.sheaf.length > 0 && <p className="sheaf">Sheaf: {entry.sheaf.join(' · ')}</p>}</article>)}
         </aside>
+      </section>
+
+      <section className="host-map-panel">
+        <div className="map-header">
+          <div>
+            <p className="kicker">Host map</p>
+            <h2>Mapped locations</h2>
+          </div>
+          <div className="map-legend" aria-label="Map legend">
+            <span className="legend-current">Current</span>
+            <span className="legend-found">Found</span>
+            <span className="legend-revealed">Revealed</span>
+            <span className="legend-hidden">Hidden</span>
+          </div>
+        </div>
+        <p className="micro">Found locations are places you have already been. Hidden zones stay obscured until the crawl reveals them.</p>
+        <div className="host-map-scroll">
+          <div className="host-map-canvas" style={{ height: `${hostMap.heightRem}rem` }}>
+            <svg className="host-map-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <marker id="map-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+                  <path d="M0,0 L6,3.5 L0,7 Z" />
+                </marker>
+              </defs>
+              {hostMap.edges.map((edge) => {
+                const fromVisited = crawl.visitedNodeIds.includes(edge.from)
+                const toVisited = crawl.visitedNodeIds.includes(edge.to)
+                const fromRevealed = revealedNodeIds.includes(edge.from)
+                const toRevealed = revealedNodeIds.includes(edge.to)
+                const edgeState = fromVisited && toVisited ? 'found' : fromRevealed && toRevealed ? 'revealed' : 'hidden'
+                return <line key={`${edge.from}-${edge.to}`} className={`map-edge ${edgeState}`} x1={edge.fromX} y1={edge.fromY + 3} x2={edge.toX} y2={edge.toY - 3} markerEnd="url(#map-arrow)" />
+              })}
+            </svg>
+            {hostMap.nodes.map((mapNode) => {
+              const isCurrent = mapNode.node.id === crawl.currentNodeId
+              const isVisited = crawl.visitedNodeIds.includes(mapNode.node.id)
+              const isRevealed = revealedNodeIds.includes(mapNode.node.id)
+              const mapState = isCurrent ? 'current' : isVisited ? 'found' : isRevealed ? 'revealed' : 'hidden'
+              const canJump = isVisited && !isCurrent
+              return <button key={mapNode.node.id} className={`map-node ${mapState}`} style={{ left: `${mapNode.x}%`, top: `${mapNode.y}%` }} disabled={!canJump} onClick={() => setCrawl((current) => ({ ...current, currentNodeId: mapNode.node.id }))}>
+                <strong>{isRevealed ? mapNode.node.title : `Unknown zone ${mapNode.hiddenIndex}`}</strong>
+                <span>{isCurrent ? 'Current location' : isVisited ? 'Found location' : isRevealed ? 'Revealed / not visited' : 'Hidden zone'}</span>
+              </button>
+            })}
+          </div>
+        </div>
       </section>
     </main>
   )
