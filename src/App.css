@@ -156,16 +156,6 @@ h2 { margin: 0 0 0.8rem; }
 }
 .door-list button.locked span { color: #ffb3cf; }
 
-.custom-action {
-  border: 1px dashed rgba(126, 231, 255, 0.30);
-  background: rgba(126, 231, 255, 0.06);
-  border-radius: 18px;
-  margin-top: 1rem;
-  padding: 1rem;
-}
-.custom-action-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem; margin-top: 0.45rem; }
-.custom-action p { margin-bottom: 0; }
-
 .roll-feedback {
   border: 2px solid rgba(126, 231, 255, 0.44);
   border-radius: 22px;
@@ -284,7 +274,7 @@ h2 { margin: 0 0 0.8rem; }
   .status-grid { grid-template-columns: 1fr 1fr; }
   .active-threats, .pool-allocations { grid-template-columns: 1fr; }
   .crawl-layout { grid-template-columns: 1fr; }
-  .roll-grid, .custom-action-row, .threat-actions, .run-summary-grid, .run-report-actions { grid-template-columns: 1fr; }
+  .roll-grid, .threat-actions, .run-summary-grid, .run-report-actions { grid-template-columns: 1fr; }
   .log-panel { max-height: none; }
 }
 

@@ -502,7 +502,6 @@ function App() {
   const [hostIndex, setHostIndex] = useState<HostIndexEntry[]>([])
   const [crawl, setCrawl] = useState<CrawlState>(initialState.crawl)
   const [message, setMessage] = useState('')
-  const [customAction, setCustomAction] = useState('')
   const [rollFeedback, setRollFeedback] = useState<RollFeedback | undefined>()
   const [computerSkill, setComputerSkill] = useState(8)
   const [hackingPoolAvailable, setHackingPoolAvailable] = useState(6)
@@ -568,7 +567,6 @@ function App() {
     setHost(nextHost)
     setCrawl(freshCrawl(nextHost))
     setSelectedChoiceIndex(0)
-    setCustomAction('')
     setRollFeedback(undefined)
     setMessage(`Loaded ${nextHost.name} from ${source}.`)
   }
@@ -856,29 +854,6 @@ function App() {
     setMessage(`${pendingThreat.label} is now active. Continuing under pressure.`)
   }
 
-  function recordCustomAction() {
-    const trimmedAction = customAction.trim()
-    if (!trimmedAction) {
-      setMessage('Describe the custom Matrix action before recording it for GM adjudication.')
-      return
-    }
-    const entry: PathEntry = {
-      id: `path-${Date.now()}`,
-      at: new Date().toLocaleTimeString(),
-      from: currentNode.id,
-      verb: 'GM Call',
-      choice: trimmedAction,
-      to: currentNode.id,
-      outcome: 'gm',
-      tallyIncrease: 0,
-      sheaf: [],
-    }
-    setCrawl((current) => ({ ...current, path: [entry, ...current.path].slice(0, 60) }))
-    setRollFeedback({ id: Date.now(), tone: 'neutral', icon: '🎲', title: 'GM adjudication', detail: 'Custom RAW-style action recorded' })
-    setCustomAction('')
-    setMessage('Custom action recorded for GM adjudication; call for the RAW test or consequence that fits the table.')
-  }
-
   function copyRunReport() {
     if (!runReport) return
     void navigator.clipboard.writeText(runReport).then(() => {
@@ -891,7 +866,6 @@ function App() {
   function resetCrawl() {
     setCrawl(freshCrawl(host))
     setSelectedChoiceIndex(0)
-    setCustomAction('')
     setRollFeedback(undefined)
   }
 
@@ -998,7 +972,7 @@ function App() {
               <button onClick={() => rollThreatCheckpoint('jackout')}><strong>Jack Out</strong><span>{pendingThreatActionDetails?.jackout}</span></button>
             </div>
           </div> : <>
-            <div className="action-header"><span>Featured actions</span><small>{currentNode.choices.length} shown · scenario profiles may use 1-4 here</small></div>
+            <div className="action-header"><span>Featured actions</span><small>{currentNode.choices.length} shown · use up to 4 core actions plus a back-out option</small></div>
             <div className="door-list verb-list">
               {currentNode.choices.length === 0 && <p className="empty">No more featured actions from here.</p>}
               {currentNode.choices.map((choice, index) => {
@@ -1006,14 +980,6 @@ function App() {
                 const isLocked = gate?.state === 'locked'
                 return <button key={`${choice.label}-${choice.to}`} className={`${selectedChoiceIndex === index ? 'selected' : ''} ${isLocked ? 'locked' : ''}`} disabled={isLocked} onClick={() => setSelectedChoiceIndex(index)}><strong>{isLocked ? 'Locked' : verbForChoice(choice)}</strong><span>{isLocked ? 'Route burned by failed roll' : choice.label}</span>{choice.testId && <small>TN {choice.targetNumber ?? host.taskTargetNumbers[choice.testId] ?? host.hostRating} · unlocks on {Math.max(1, choice.unlockSuccesses ?? 1)}+ success(es){gate?.state === 'unlocked' ? ' · unlocked' : ''}</small>}</button>
               })}
-            </div>
-            <div className="custom-action">
-              <label htmlFor="custom-action">Custom / RAW action</label>
-              <div className="custom-action-row">
-                <input id="custom-action" value={customAction} placeholder="Describe a Matrix action for GM adjudication" onChange={(event) => setCustomAction(event.target.value)} />
-                <button onClick={recordCustomAction}>Record GM Call</button>
-              </div>
-              <p className="micro">Use this when the decker wants a normal SR3-style operation outside the featured branches.</p>
             </div>
             {selectedChoice && <div className="roll-preview">
               <p className="kicker">Selected verb</p>

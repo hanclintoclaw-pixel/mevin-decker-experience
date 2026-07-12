@@ -1,6 +1,6 @@
 # Mevin Decker Experience
 
-A branching, fictional Shadowrun 3rd Edition Matrix-host flowchart scene tool for Mevin. It is meant for live table use: load a scenario JSON profile, click through connected node/encounter cards, choose from 1-4 featured actions or record a GM-adjudicated RAW action, roll provisional SR3-inspired table checks, update Security Tally, and reveal new route branches only when the decker succeeds.
+A branching, fictional Shadowrun 3rd Edition Matrix-host flowchart scene tool for Mevin. It is meant for live table use: load a scenario JSON profile, click through connected node/encounter cards, choose from focused featured actions, roll provisional SR3-inspired table checks, update Security Tally, and reveal new route branches only when the decker succeeds.
 
 ## Data sources
 

@@ -39,8 +39,8 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 - Every `choice.to` should match another node `id` unless it intentionally points to a future placeholder.
 - `choice.testId` is optional. If present, the app uses `taskTargetNumbers[testId]` or falls back to `hostRating`.
 - The recommended campaign pattern is at most two initial doors: an optional no-roll public visitor door and a secure/hidden decker intrusion door.
-- Each private-side node may have 1-4 featured `choices`. Existing 2-choice profiles remain valid; a 1-choice node is appropriate for a single locked door, terminal, or forced-forward obstacle.
-- The app also provides a custom/RAW action lane at every node for GM-adjudicated operations outside the featured choices.
+- Each private-side node should usually have 1-4 core featured `choices`. Existing 2-choice profiles remain valid; a 1-choice node is appropriate for a single locked door or terminal if it also provides a way to back out nearby.
+- A node may have a fifth choice only when that last choice is a back-out, return, retreat, or logoff option.
 - Tested choices are gated: by default, 1+ success unlocks and reveals the target node; failure locks that choice for the current crawl and reveals nothing beyond it.
 - When Security Tally crosses a `securitySheaf` threshold, the app pauses normal navigation with a checkpoint. The player can suppress/evade, fight, ignore, or jack out; ignored or failed checkpoints become active pressure that adds Tally risk to later tested actions.
 - `securitySheaf[].encounter` is optional. Without it, the app infers IC type from the label (`Probe`, `Trace`, `Scramble`, `Tar Baby`, `Killer`, `Blaster`, `Sparky`, `Black`, `Psychotropic`, etc.). Encounter metadata can override `type`, `rating`, `terminalOnFail`, and GM-facing `consequence` text. The checkpoint UI explains what the IC type does and what the four response choices risk before the player commits.
