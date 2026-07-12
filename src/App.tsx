@@ -821,7 +821,7 @@ function App() {
           <p className="kicker">FICTIONAL MATRIX CRAWL // SR3 TABLE AID</p>
           <h1>Mevin Decker Experience</h1>
           <p className="subtitle">A fictional Matrix-host scene flow: doors, nodes, rolls, branches, and tabletop consequences.</p>
-          <p className="micro">Build {__SOURCE_COMMIT__} · <a href="https://hanclintoclaw-pixel.github.io/mevin-deck-manager/">Deck Manager</a> · <a href="https://hanclintoclaw-pixel.github.io/campaign-wiki/Minigames.html">Minigames</a></p>
+          <p className="micro">Build {__SOURCE_COMMIT__} · <a href="https://hanclintoclaw-pixel.github.io/mevin-deck-manager/">Deck Manager</a> · <a href="https://hanclintoclaw-pixel.github.io/campaign-wiki/Documentation/Mevin-Decker-Experience-Manual.html">Manual</a> · <a href="https://hanclintoclaw-pixel.github.io/campaign-wiki/Minigames.html">Minigames</a></p>
         </div>
         <div className="hero-buttons">
           <button onClick={syncDeck}>Sync Deck Manager</button>
