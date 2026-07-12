@@ -217,6 +217,8 @@ const DECK_MANAGER_STORAGE_KEY = 'cindylou.sr3MevinDeckManager.v1'
 const STORAGE_KEY = 'cindylou.mevinDeckerExperience.v1'
 const HOST_INDEX_URL = 'https://hanclintoclaw-pixel.github.io/campaign-wiki/data/matrix-hosts/index.json'
 const HAPPY_CAT_URL = 'https://hanclintoclaw-pixel.github.io/campaign-wiki/data/matrix-hosts/happy-cat-public-storefront-host.json'
+const GRACEFUL_LOGOFF_NODE_ID = '__front-door-graceful-logoff__'
+const GRACEFUL_LOGOFF_CHOICE: FlowChoice = { label: 'Graceful Logoff', to: GRACEFUL_LOGOFF_NODE_ID }
 
 const seedDeck: DeckRuntime = {
   sourceName: 'Starter fallback deck',
@@ -308,9 +310,35 @@ function choiceKey(nodeId: string, choiceIndex: number) {
   return `${nodeId}:${choiceIndex}`
 }
 
+function isGracefulLogoffChoice(choice?: FlowChoice) {
+  return choice?.to === GRACEFUL_LOGOFF_NODE_ID
+}
+
+function hasFrontDoorLogoff(host: HostProfile) {
+  const startNode = host.flow.nodes.find((node) => node.id === host.flow.startNodeId)
+  return Boolean(startNode?.choices.some((choice) => choice.to === GRACEFUL_LOGOFF_NODE_ID || /graceful\s+log\s*off|log\s*off|logoff|quiet\s+exit/i.test(choice.label)))
+}
+
+function frontDoorChoices(node: FlowNode, host: HostProfile) {
+  if (node.id !== host.flow.startNodeId || hasFrontDoorLogoff(host)) return node.choices
+  return [...node.choices, GRACEFUL_LOGOFF_CHOICE]
+}
+
+function gracefulLogoffEnd(): RunEndState {
+  return {
+    id: `run-end-${Date.now()}`,
+    kind: 'gracefulLogoff',
+    title: 'Graceful Logoff',
+    detail: 'The decker backs out through the front door and closes the session without forcing a jackout or hostile disconnect.',
+    notifyGm: 'RUN OVER — alert the GM: graceful logoff completed. Host was exited quietly; no active IC/security pressure remained.',
+  }
+}
+
 function buildHostMapLayout(host: HostProfile): HostMapLayout {
-  const nodeOrder = new Map(host.flow.nodes.map((node, index) => [node.id, index]))
-  const nodeById = new Map(host.flow.nodes.map((node) => [node.id, node]))
+  const syntheticLogoffNode: FlowNode = { id: GRACEFUL_LOGOFF_NODE_ID, title: 'Graceful Logoff', kind: 'exit', description: 'Exit the Host quietly from the front door.', choices: [] }
+  const allNodes = hasFrontDoorLogoff(host) ? host.flow.nodes : [...host.flow.nodes, syntheticLogoffNode]
+  const nodeOrder = new Map(allNodes.map((node, index) => [node.id, index]))
+  const nodeById = new Map(allNodes.map((node) => [node.id, node]))
   const depthById = new Map<string, number>([[host.flow.startNodeId, 0]])
   const parentById = new Map<string, { from: string; label: string }>()
   const queue = [host.flow.startNodeId]
@@ -321,7 +349,7 @@ function buildHostMapLayout(host: HostProfile): HostMapLayout {
     const node = nodeById.get(nodeId)
     if (!node) continue
     const nextDepth = (depthById.get(nodeId) ?? 0) + 1
-    for (const choice of node.choices) {
+    for (const choice of frontDoorChoices(node, host)) {
       if (!nodeById.has(choice.to) || choice.to === node.id) continue
       const existingDepth = depthById.get(choice.to)
       if (existingDepth !== undefined && existingDepth <= nextDepth) continue
@@ -332,12 +360,12 @@ function buildHostMapLayout(host: HostProfile): HostMapLayout {
   }
 
   const fallbackDepth = Math.max(0, ...depthById.values()) + 1
-  for (const node of host.flow.nodes) {
+  for (const node of allNodes) {
     if (!depthById.has(node.id)) depthById.set(node.id, fallbackDepth)
   }
 
   const levels = new Map<number, FlowNode[]>()
-  for (const node of host.flow.nodes) {
+  for (const node of allNodes) {
     const depth = depthById.get(node.id) ?? fallbackDepth
     levels.set(depth, [...(levels.get(depth) ?? []), node])
   }
@@ -639,12 +667,17 @@ function dumpshockRunEnd(kind: 'shutdownDumpshock' | 'failedJackoutDumpshock', d
 
 function runEndForNode(node: FlowNode, activeThreats: ThreatCheckpoint[]): RunEndState | undefined {
   if (node.kind !== 'exit' && node.choices.length > 0) return undefined
+  const isGracefulLogoff = node.kind === 'exit'
   return {
     id: `run-end-${Date.now()}`,
-    kind: node.kind === 'exit' ? 'gracefulLogoff' : 'objectiveComplete',
-    title: node.kind === 'exit' ? 'Graceful Logoff' : 'Run Objective Complete',
+    kind: isGracefulLogoff ? 'gracefulLogoff' : 'objectiveComplete',
+    title: isGracefulLogoff ? 'Graceful Logoff' : 'Run Objective Complete',
     detail: node.description,
-    notifyGm: activeThreats.length > 0 ? 'Tell the GM the run ended while IC/security pressure was still active.' : 'Tell the GM the final recovered data, permanent changes, and clean-exit status.',
+    notifyGm: isGracefulLogoff
+      ? activeThreats.length > 0
+        ? 'RUN OVER — alert the GM: graceful logoff completed, but unresolved IC/security pressure was still active.'
+        : 'RUN OVER — alert the GM: graceful logoff completed. Host was exited quietly; no active IC/security pressure remained.'
+      : activeThreats.length > 0 ? 'Tell the GM the run ended while IC/security pressure was still active.' : 'Tell the GM the final recovered data, permanent changes, and clean-exit status.',
   }
 }
 
@@ -711,6 +744,7 @@ function App() {
   const hostNodeById = useMemo(() => new Map(host.flow.nodes.map((node) => [node.id, node])), [host])
   const hostMap = useMemo(() => buildHostMapLayout(host), [host])
   const currentNode = useMemo(() => hostNodeById.get(crawl.currentNodeId) ?? host.flow.nodes[0], [host, hostNodeById, crawl.currentNodeId])
+  const currentChoices = useMemo(() => frontDoorChoices(currentNode, host), [currentNode, host])
   const revealedNodeIds = crawl.revealedNodeIds ?? crawl.visitedNodeIds
   const choiceGates = crawl.choiceGates ?? EMPTY_CHOICE_GATES
   const pendingThreat = crawl.pendingThreats?.[0]
@@ -731,7 +765,7 @@ function App() {
   const passiveAlertAt = Math.ceil(shutdownTally / 3)
   const activeAlertAt = Math.ceil((shutdownTally * 2) / 3)
   const nextSheaf = nextSecurityEvent(host, crawl)
-  const selectedChoice = currentNode.choices[selectedChoiceIndex]
+  const selectedChoice = currentChoices[selectedChoiceIndex]
   const selectedChoiceGate = selectedChoice ? choiceGates[choiceKey(currentNode.id, selectedChoiceIndex)] : undefined
   const selectedRequiredSuccesses = selectedChoice?.testId ? Math.max(1, selectedChoice.unlockSuccesses ?? 1) : 0
   const selectedPersona = selectedChoice ? testPersona(selectedChoice.testId) : 'sensors'
@@ -744,10 +778,10 @@ function App() {
 
   useEffect(() => {
     const selectedKey = choiceKey(currentNode.id, selectedChoiceIndex)
-    if (selectedChoiceIndex < currentNode.choices.length && choiceGates[selectedKey]?.state !== 'locked') return
-    const firstOpenChoice = currentNode.choices.findIndex((_, index) => choiceGates[choiceKey(currentNode.id, index)]?.state !== 'locked')
+    if (selectedChoiceIndex < currentChoices.length && choiceGates[selectedKey]?.state !== 'locked') return
+    const firstOpenChoice = currentChoices.findIndex((_, index) => choiceGates[choiceKey(currentNode.id, index)]?.state !== 'locked')
     setSelectedChoiceIndex(firstOpenChoice >= 0 ? firstOpenChoice : 0)
-  }, [choiceGates, currentNode, selectedChoiceIndex])
+  }, [choiceGates, currentChoices, currentNode, selectedChoiceIndex])
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, deck, host, hostUrl, crawl }))
@@ -859,6 +893,28 @@ function App() {
       return
     }
     const from = currentNode.id
+    if (isGracefulLogoffChoice(selectedChoice)) {
+      const entry: PathEntry = {
+        id: `path-${Date.now()}`,
+        at: new Date().toLocaleTimeString(),
+        from,
+        verb: 'Graceful Logoff',
+        choice: selectedChoice.label,
+        to: selectedChoice.to,
+        outcome: 'opened',
+        tallyIncrease: 0,
+      }
+      setRollFeedback({ id: Date.now(), tone: 'success', icon: '🟢', title: 'Graceful Logoff', detail: 'Host exited quietly.' })
+      setCrawl((current) => ({
+        ...current,
+        revealedNodeIds: unique([...(current.revealedNodeIds ?? current.visitedNodeIds), GRACEFUL_LOGOFF_NODE_ID]),
+        visitedNodeIds: unique([...current.visitedNodeIds, GRACEFUL_LOGOFF_NODE_ID]),
+        runEnd: gracefulLogoffEnd(),
+        path: [entry, ...current.path].slice(0, 60),
+      }))
+      setMessage('Graceful logoff complete. The Host was exited quietly.')
+      return
+    }
     let dice: number[] | undefined
     let successes: number | undefined
     let targetNumber: number | undefined
@@ -1144,16 +1200,16 @@ function App() {
         <article><span>Location</span><strong>{runEnd ? runEnd.title : currentNode.title}</strong><small>{activeThreats.length ? `${activeThreats.length} active threat(s)` : deferredThreats.length ? `${deferredThreats.length} suppressed IC queued` : currentNode.kind}</small></article>
       </section>
 
-      {alertState !== 'normal' && !runEnd && <section className={`alert-state ${alertState}`}><span className="alert-light" /><article><strong>{alertLabel(alertState)}</strong><small>{alertState === 'passive' ? `Security Tally has reached at least one-third of shutdown (${passiveAlertAt}/${shutdownTally}). The host is suspicious.` : alertState === 'active' ? `Security Tally has reached at least two-thirds of shutdown (${activeAlertAt}/${shutdownTally}). The host is actively responding.` : `Security Tally has reached shutdown (${shutdownTally}).`}</small></article></section>}
       {activeThreats.length > 0 && <section className="active-threats"><span>Active pressure</span>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Rating {threat.rating} · {descriptionForThreat(threat.type)}</small></article>)}</section>}
       {deferredThreats.length > 0 && <section className="deferred-threats"><span>Suppressed IC queued</span>{deferredThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Returns at Tally {threat.threshold} · {icClassForThreat(threat.type).toUpperCase()} IC</small></article>)}</section>}
       {(dfPoolReserve > 0 || poolLocks.length > 0) && <section className="pool-allocations"><span>Pool allocations</span>{dfPoolReserve > 0 && <article><strong>Detection Factor reserve</strong><small>{dfPoolReserve} Hacking Pool dice reserved · effective DF {effectiveDetectionFactor}</small></article>}{poolLocks.map((lock) => <article key={lock.id}><strong>{lock.reason}: {lock.label}</strong><small>{lock.dice} Hacking Pool die/dice tied up until {lock.sourceThreatId ? 'the IC returns' : 'reset/end'}</small></article>)}</section>}
 
       <section className="crawl-layout">
-        <section className="node-card">
+        <section className={`node-card ${!runEnd && alertState !== 'normal' ? `alert-${alertState}` : ''}`}>
           <p className="kicker">Current node</p>
           <h2>{currentNode.title}</h2>
           <p>{currentNode.description}</p>
+          {alertState !== 'normal' && !runEnd && <div className={`node-alert ${alertState}`}><span className="alert-light" /><article><strong>{alertLabel(alertState)}</strong><small>{alertState === 'passive' ? `Security Tally has reached at least one-third of shutdown (${passiveAlertAt}/${shutdownTally}). The host is suspicious.` : alertState === 'active' ? `Security Tally has reached at least two-thirds of shutdown (${activeAlertAt}/${shutdownTally}). The host is actively responding.` : `Security Tally has reached shutdown (${shutdownTally}).`}</small></article></div>}
           {rollFeedback && <div key={rollFeedback.id} className={`roll-feedback ${rollFeedback.tone}`}><strong>{rollFeedback.icon} {rollFeedback.title}</strong><span>{rollFeedback.detail}</span></div>}
           {runEnd ? <div className="run-end-card">
             <p className="kicker">RUN OVER — ALERT THE GM</p>
@@ -1199,17 +1255,18 @@ function App() {
               <button onClick={() => rollThreatCheckpoint('jackout')}><strong>Jack Out</strong><span>{pendingThreatActionDetails?.jackout}</span></button>
             </div>
           </div> : <>
-            <div className="action-header"><span>Featured actions</span><small>{currentNode.choices.length} shown · use up to 4 core actions plus a back-out option</small></div>
+            <div className="action-header"><span>Featured actions</span><small>{currentChoices.length} shown · use up to 4 core actions plus a back-out/logoff option</small></div>
             <div className="door-list verb-list">
-              {currentNode.choices.length === 0 && <p className="empty">No more featured actions from here.</p>}
-              {currentNode.choices.map((choice, index) => {
+              {currentChoices.length === 0 && <p className="empty">No more featured actions from here.</p>}
+              {currentChoices.map((choice, index) => {
                 const gate = choiceGates[choiceKey(currentNode.id, index)]
                 const isLocked = gate?.state === 'locked'
+                const isGracefulLogoff = isGracefulLogoffChoice(choice)
                 const destination = hostNodeById.get(choice.to)
-                const destinationVisited = destination ? crawl.visitedNodeIds.includes(destination.id) : false
-                const destinationRevealed = destination ? revealedNodeIds.includes(destination.id) : false
+                const destinationVisited = isGracefulLogoff || (destination ? crawl.visitedNodeIds.includes(destination.id) : false)
+                const destinationRevealed = isGracefulLogoff || (destination ? revealedNodeIds.includes(destination.id) : false)
                 const locationState = destinationVisited ? 'found' : destinationRevealed ? 'revealed' : 'hidden'
-                const locationLabel = destinationVisited ? 'Found location' : destinationRevealed ? 'Revealed / not visited' : 'Hidden zone'
+                const locationLabel = isGracefulLogoff ? 'Quiet exit' : destinationVisited ? 'Found location' : destinationRevealed ? 'Revealed / not visited' : 'Hidden zone'
                 return <button key={`${choice.label}-${choice.to}`} className={`${selectedChoiceIndex === index ? 'selected' : ''} ${isLocked ? 'locked' : ''} route-${locationState}`} disabled={isLocked} onClick={() => setSelectedChoiceIndex(index)}><strong>{isLocked ? 'Locked' : verbForChoice(choice)}</strong><span>{isLocked ? 'Route burned by failed roll' : choice.label}</span><small className={`location-state ${locationState}`}>{locationLabel}</small>{choice.testId && <small>TN {choice.targetNumber ?? host.taskTargetNumbers[choice.testId] ?? host.hostRating} · unlocks on {Math.max(1, choice.unlockSuccesses ?? 1)}+ success(es){gate?.state === 'unlocked' ? ' · unlocked' : ''}</small>}</button>
               })}
             </div>
@@ -1261,8 +1318,8 @@ function App() {
               {hostMap.edges.map((edge) => {
                 const fromVisited = crawl.visitedNodeIds.includes(edge.from)
                 const toVisited = crawl.visitedNodeIds.includes(edge.to)
-                const fromRevealed = revealedNodeIds.includes(edge.from)
-                const toRevealed = revealedNodeIds.includes(edge.to)
+                const fromRevealed = edge.from === GRACEFUL_LOGOFF_NODE_ID || revealedNodeIds.includes(edge.from)
+                const toRevealed = edge.to === GRACEFUL_LOGOFF_NODE_ID || revealedNodeIds.includes(edge.to)
                 const edgeState = fromVisited && toVisited ? 'found' : fromRevealed && toRevealed ? 'revealed' : 'hidden'
                 const fromY = Math.min(100, edge.fromY + 4.5)
                 const toY = Math.max(0, edge.toY - 4.5)
@@ -1273,7 +1330,7 @@ function App() {
             {hostMap.nodes.map((mapNode) => {
               const isCurrent = mapNode.node.id === crawl.currentNodeId
               const isVisited = crawl.visitedNodeIds.includes(mapNode.node.id)
-              const isRevealed = revealedNodeIds.includes(mapNode.node.id)
+              const isRevealed = mapNode.node.id === GRACEFUL_LOGOFF_NODE_ID || revealedNodeIds.includes(mapNode.node.id)
               const mapState = isCurrent ? 'current' : isVisited ? 'found' : isRevealed ? 'revealed' : 'hidden'
               const canJump = isVisited && !isCurrent
               return <button key={mapNode.node.id} className={`map-node ${mapState}`} style={{ left: `${mapNode.x}%`, top: `${mapNode.y}%` }} disabled={!canJump} onClick={() => setCrawl((current) => ({ ...current, currentNodeId: mapNode.node.id }))}>
