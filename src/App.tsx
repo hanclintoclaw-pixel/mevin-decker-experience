@@ -37,12 +37,22 @@ interface FlowChoice {
   securityValue?: number
 }
 
+interface RunAdvantageDefinition {
+  name: string
+  reason?: string
+  diceBonus?: number
+  targetNumberModifier?: number
+  requiredSuccessModifier?: number
+  appliesTo?: string[]
+}
+
 interface FlowNode {
   id: string
   title: string
   kind: string
   description: string
   choices: FlowChoice[]
+  advantages?: RunAdvantageDefinition[]
 }
 
 type ThreatType = 'probe' | 'trace' | 'scramble' | 'tarBaby' | 'killer' | 'blaster' | 'sparky' | 'black' | 'psychotropic' | 'generic'
@@ -152,6 +162,13 @@ interface PoolLock {
   reason: string
 }
 
+interface RunAdvantage extends Required<Omit<RunAdvantageDefinition, 'appliesTo' | 'reason'>> {
+  id: string
+  source: 'manual' | 'host'
+  reason: string
+  appliesTo: string[]
+}
+
 interface RunEndState {
   id: string
   kind: RunEndKind
@@ -169,6 +186,7 @@ interface CrawlState {
   activeThreats?: ThreatCheckpoint[]
   deferredThreats?: ThreatCheckpoint[]
   poolLocks?: PoolLock[]
+  advantages?: RunAdvantage[]
   dfPoolReserve?: number
   outcomes?: RunOutcome[]
   runEnd?: RunEndState
@@ -204,6 +222,7 @@ const EMPTY_CHOICE_GATES: Record<string, ChoiceGateState> = {}
 const EMPTY_THREATS: ThreatCheckpoint[] = []
 const EMPTY_OUTCOMES: RunOutcome[] = []
 const EMPTY_POOL_LOCKS: PoolLock[] = []
+const EMPTY_ADVANTAGES: RunAdvantage[] = []
 
 interface StoredAppState {
   version: 1
@@ -298,8 +317,53 @@ function dfBonusFromReserve(dfPoolReserve: number) {
   return Math.min(3, Math.floor(dfPoolReserve / 2))
 }
 
+function activeAdvantagesForTest(advantages: RunAdvantage[], testId?: string) {
+  return advantages.filter((advantage) => advantage.appliesTo.length === 0 || (testId ? advantage.appliesTo.includes(testId) : false))
+}
+
+function advantageTotals(advantages: RunAdvantage[], testId?: string) {
+  return activeAdvantagesForTest(advantages, testId).reduce((totals, advantage) => ({
+    diceBonus: totals.diceBonus + advantage.diceBonus,
+    targetNumberModifier: totals.targetNumberModifier + advantage.targetNumberModifier,
+    requiredSuccessModifier: totals.requiredSuccessModifier + advantage.requiredSuccessModifier,
+  }), { diceBonus: 0, targetNumberModifier: 0, requiredSuccessModifier: 0 })
+}
+
+function adjustedTargetNumber(baseTargetNumber: number, targetNumberModifier: number) {
+  return Math.max(2, baseTargetNumber + targetNumberModifier)
+}
+
+function adjustedRequiredSuccesses(baseRequiredSuccesses: number, requiredSuccessModifier: number) {
+  return Math.max(1, baseRequiredSuccesses + requiredSuccessModifier)
+}
+
+function modifierSummary(totals: { diceBonus: number; targetNumberModifier: number; requiredSuccessModifier: number }) {
+  const parts = []
+  if (totals.diceBonus) parts.push(`${totals.diceBonus > 0 ? '+' : ''}${totals.diceBonus} dice`)
+  if (totals.targetNumberModifier) parts.push(`${totals.targetNumberModifier > 0 ? '+' : ''}${totals.targetNumberModifier} TN`)
+  if (totals.requiredSuccessModifier) parts.push(`${totals.requiredSuccessModifier > 0 ? '+' : ''}${totals.requiredSuccessModifier} required success(es)`)
+  return parts.length ? parts.join(', ') : 'none'
+}
+
+function normalizeAppliesTo(value: string) {
+  return value.split(',').map((item) => item.trim()).filter(Boolean)
+}
+
+function advantagesForNode(node: FlowNode): RunAdvantage[] {
+  return (node.advantages ?? []).map((advantage, index) => ({
+    id: `advantage-${node.id}-${index}-${advantage.name}`,
+    source: 'host' as const,
+    name: advantage.name,
+    reason: advantage.reason ?? node.title,
+    diceBonus: advantage.diceBonus ?? 0,
+    targetNumberModifier: advantage.targetNumberModifier ?? 0,
+    requiredSuccessModifier: advantage.requiredSuccessModifier ?? 0,
+    appliesTo: advantage.appliesTo ?? [],
+  }))
+}
+
 function freshCrawl(host: HostProfile): CrawlState {
-  return { currentNodeId: host.flow.startNodeId, visitedNodeIds: [host.flow.startNodeId], revealedNodeIds: [host.flow.startNodeId], choiceGates: {}, pendingThreats: [], activeThreats: [], deferredThreats: [], poolLocks: [], dfPoolReserve: 0, outcomes: [], securityTally: 0, path: [] }
+  return { currentNodeId: host.flow.startNodeId, visitedNodeIds: [host.flow.startNodeId], revealedNodeIds: [host.flow.startNodeId], choiceGates: {}, pendingThreats: [], activeThreats: [], deferredThreats: [], poolLocks: [], advantages: [], dfPoolReserve: 0, outcomes: [], securityTally: 0, path: [] }
 }
 
 function unique(values: string[]) {
@@ -412,6 +476,7 @@ function normalizeCrawl(crawl: CrawlState, host: HostProfile): CrawlState {
     activeThreats: crawl.activeThreats ?? [],
     deferredThreats: crawl.deferredThreats ?? [],
     poolLocks: crawl.poolLocks ?? [],
+    advantages: crawl.advantages ?? [],
     dfPoolReserve: crawl.dfPoolReserve ?? 0,
     outcomes: crawl.outcomes ?? [],
     runEnd: crawl.runEnd,
@@ -702,7 +767,7 @@ function runEndForThreat(threat: ThreatCheckpoint, kind: RunEndKind): RunEndStat
   }
 }
 
-function buildRunReport(host: HostProfile, deck: DeckRuntime, crawl: CrawlState, runEnd: RunEndState, outcomes: RunOutcome[], activeThreats: ThreatCheckpoint[], poolLocks: PoolLock[], dfPoolReserve: number) {
+function buildRunReport(host: HostProfile, deck: DeckRuntime, crawl: CrawlState, runEnd: RunEndState, outcomes: RunOutcome[], activeThreats: ThreatCheckpoint[], poolLocks: PoolLock[], advantages: RunAdvantage[], dfPoolReserve: number) {
   const dfBonus = dfBonusFromReserve(dfPoolReserve)
   const shutdownTally = shutdownTallyForHost(host)
   const lines = [
@@ -725,6 +790,9 @@ function buildRunReport(host: HostProfile, deck: DeckRuntime, crawl: CrawlState,
     `Pool allocations (${poolLocks.length + (dfPoolReserve > 0 ? 1 : 0)}):`,
     ...(dfPoolReserve > 0 ? [`DF reserve: ${dfPoolReserve} Hacking Pool dice (${dfBonus > 0 ? `+${dfBonus} DF` : 'no DF bonus until 2 dice are reserved'})`] : []),
     ...(poolLocks.length > 0 ? poolLocks.map((lock, index) => `${index + 1}. ${lock.reason}: ${lock.label} (${lock.dice} die/dice)`) : dfPoolReserve > 0 ? [] : ['None recorded.']),
+    '',
+    `Run advantages (${advantages.length}):`,
+    ...(advantages.length > 0 ? advantages.map((advantage, index) => `${index + 1}. ${advantage.name} [${advantage.source}]: ${modifierSummary(advantage)}${advantage.appliesTo.length ? `; applies to ${advantage.appliesTo.join(', ')}` : '; applies to all tested rolls'} — ${advantage.reason}`) : ['None recorded.']),
   ]
   return lines.join('\n')
 }
@@ -741,6 +809,12 @@ function App() {
   const [computerSkill, setComputerSkill] = useState(8)
   const [hackingPoolAvailable, setHackingPoolAvailable] = useState(6)
   const [selectedChoiceIndex, setSelectedChoiceIndex] = useState(0)
+  const [manualAdvantageName, setManualAdvantageName] = useState('GM situational edge')
+  const [manualAdvantageReason, setManualAdvantageReason] = useState('')
+  const [manualDiceBonus, setManualDiceBonus] = useState(0)
+  const [manualTargetNumberModifier, setManualTargetNumberModifier] = useState(-1)
+  const [manualRequiredSuccessModifier, setManualRequiredSuccessModifier] = useState(0)
+  const [manualAppliesTo, setManualAppliesTo] = useState('')
   const hostNodeById = useMemo(() => new Map(host.flow.nodes.map((node) => [node.id, node])), [host])
   const hostMap = useMemo(() => buildHostMapLayout(host), [host])
   const currentNode = useMemo(() => hostNodeById.get(crawl.currentNodeId) ?? host.flow.nodes[0], [host, hostNodeById, crawl.currentNodeId])
@@ -751,6 +825,7 @@ function App() {
   const activeThreats = crawl.activeThreats ?? EMPTY_THREATS
   const deferredThreats = crawl.deferredThreats ?? EMPTY_THREATS
   const poolLocks = crawl.poolLocks ?? EMPTY_POOL_LOCKS
+  const advantages = crawl.advantages ?? EMPTY_ADVANTAGES
   const outcomes = crawl.outcomes ?? EMPTY_OUTCOMES
   const runEnd = crawl.runEnd
   const lockedPoolDice = poolLockTotal(poolLocks)
@@ -767,14 +842,18 @@ function App() {
   const nextSheaf = nextSecurityEvent(host, crawl)
   const selectedChoice = currentChoices[selectedChoiceIndex]
   const selectedChoiceGate = selectedChoice ? choiceGates[choiceKey(currentNode.id, selectedChoiceIndex)] : undefined
-  const selectedRequiredSuccesses = selectedChoice?.testId ? Math.max(1, selectedChoice.unlockSuccesses ?? 1) : 0
+  const selectedAdvantageTotals = selectedChoice?.testId ? advantageTotals(advantages, selectedChoice.testId) : { diceBonus: 0, targetNumberModifier: 0, requiredSuccessModifier: 0 }
+  const selectedBaseRequiredSuccesses = selectedChoice?.testId ? Math.max(1, selectedChoice.unlockSuccesses ?? 1) : 0
+  const selectedRequiredSuccesses = selectedChoice?.testId ? adjustedRequiredSuccesses(selectedBaseRequiredSuccesses, selectedAdvantageTotals.requiredSuccessModifier) : 0
   const selectedPersona = selectedChoice ? testPersona(selectedChoice.testId) : 'sensors'
   const selectedUtility = selectedChoice ? bestUtility(deck, selectedChoice.testId) : 0
-  const selectedTargetNumber = selectedChoice?.testId ? (selectedChoice.targetNumber ?? host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating) : undefined
-  const selectedDicePool = selectedChoice?.testId ? Math.max(1, computerSkill + effectiveHackingPool) : undefined
+  const selectedBaseTargetNumber = selectedChoice?.testId ? (selectedChoice.targetNumber ?? host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating) : undefined
+  const selectedTargetNumber = selectedBaseTargetNumber ? adjustedTargetNumber(selectedBaseTargetNumber, selectedAdvantageTotals.targetNumberModifier) : undefined
+  const selectedDicePool = selectedChoice?.testId ? Math.max(1, computerSkill + effectiveHackingPool + selectedAdvantageTotals.diceBonus) : undefined
   const pendingThreatActionDetails = pendingThreat ? actionDetailsForThreat(pendingThreat) : undefined
   const pendingThreatCanSuppress = pendingThreat ? canSuppressThreat(pendingThreat) : false
-  const runReport = useMemo(() => runEnd ? buildRunReport(host, deck, crawl, runEnd, outcomes, activeThreats, poolLocks, dfPoolReserve) : '', [activeThreats, crawl, deck, dfPoolReserve, host, outcomes, poolLocks, runEnd])
+  const threatAdvantagePreview = advantageTotals(advantages, 'threatCheckpoint')
+  const runReport = useMemo(() => runEnd ? buildRunReport(host, deck, crawl, runEnd, outcomes, activeThreats, poolLocks, advantages, dfPoolReserve) : '', [activeThreats, advantages, crawl, deck, dfPoolReserve, host, outcomes, poolLocks, runEnd])
 
   useEffect(() => {
     const selectedKey = choiceKey(currentNode.id, selectedChoiceIndex)
@@ -885,6 +964,35 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  function addManualAdvantage() {
+    const name = manualAdvantageName.trim()
+    if (!name) {
+      setMessage('Name the run advantage before adding it.')
+      return
+    }
+    if (!manualDiceBonus && !manualTargetNumberModifier && !manualRequiredSuccessModifier) {
+      setMessage('Set at least one modifier: bonus dice, TN modifier, or required-success modifier.')
+      return
+    }
+    const advantage: RunAdvantage = {
+      id: `advantage-manual-${Date.now()}`,
+      source: 'manual',
+      name,
+      reason: manualAdvantageReason.trim() || 'GM/manual adjustment',
+      diceBonus: manualDiceBonus,
+      targetNumberModifier: manualTargetNumberModifier,
+      requiredSuccessModifier: manualRequiredSuccessModifier,
+      appliesTo: normalizeAppliesTo(manualAppliesTo),
+    }
+    setCrawl((current) => ({ ...current, advantages: [...(current.advantages ?? []), advantage] }))
+    setMessage(`Added run advantage: ${advantage.name}.`)
+  }
+
+  function removeAdvantage(advantageId: string) {
+    setCrawl((current) => ({ ...current, advantages: (current.advantages ?? []).filter((advantage) => advantage.id !== advantageId) }))
+    setMessage('Run advantage removed.')
+  }
+
   function resolveSelectedChoice() {
     if (!selectedChoice) return
     const selectedKey = choiceKey(currentNode.id, selectedChoiceIndex)
@@ -924,9 +1032,9 @@ function App() {
     const poolSpent = selectedChoice.testId ? effectiveHackingPool : 0
 
     if (selectedChoice.testId) {
-      const tn = selectedChoice.targetNumber ?? host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating
+      const tn = selectedTargetNumber ?? selectedChoice.targetNumber ?? host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating
       targetNumber = tn
-      dicePool = Math.max(1, computerSkill + effectiveHackingPool)
+      dicePool = selectedDicePool ?? Math.max(1, computerSkill + effectiveHackingPool)
       dice = Array.from({ length: dicePool }, () => rollOpenD6(tn))
       successes = dice.filter((die) => die >= tn).length
       const securityDice = Array.from({ length: selectedChoice.securityValue ?? host.securityValue }, () => rollOpenD6(effectiveDetectionFactor))
@@ -992,6 +1100,9 @@ function App() {
       const destinationNode = host.flow.nodes.find((node) => node.id === selectedChoice.to)
       const nodeOutcome = passed && destinationNode ? outcomeForNode(destinationNode) : undefined
       const nextOutcomes = nodeOutcome && !(current.outcomes ?? []).some((existing) => existing.id === nodeOutcome.id) ? [...(current.outcomes ?? []), nodeOutcome] : (current.outcomes ?? [])
+      const grantedAdvantages = passed && destinationNode ? advantagesForNode(destinationNode) : []
+      const existingAdvantageIds = new Set((current.advantages ?? []).map((advantage) => advantage.id))
+      const nextAdvantages = [...(current.advantages ?? []), ...grantedAdvantages.filter((advantage) => !existingAdvantageIds.has(advantage.id))]
       const shutdownRunEnd = after >= shutdownTally ? dumpshockRunEnd('shutdownDumpshock', `Security Tally reached ${after}/${shutdownTally}. The host shuts down the run and forcibly dumps the decker.`) : undefined
       const runEnd = shutdownRunEnd ?? (passed && destinationNode ? runEndForNode(destinationNode, current.activeThreats ?? []) : undefined)
       return {
@@ -1004,6 +1115,7 @@ function App() {
         deferredThreats: remainingDeferredThreats,
         poolLocks: nextPoolLocks,
         dfPoolReserve: current.dfPoolReserve ?? 0,
+        advantages: nextAdvantages,
         outcomes: nextOutcomes,
         runEnd: runEnd ?? current.runEnd,
         securityTally: after,
@@ -1041,9 +1153,10 @@ function App() {
       setMessage(suppressionBlockedText(pendingThreat))
       return
     }
-    const targetNumber = action === 'jackout' ? Math.max(4, pendingThreat.rating - 1) : pendingThreat.rating
-    const requiredSuccesses = action === 'fight' ? 2 : 1
-    const dicePool = Math.max(1, computerSkill + effectiveHackingPool)
+    const threatAdvantageTotals = advantageTotals(advantages, 'threatCheckpoint')
+    const targetNumber = adjustedTargetNumber(action === 'jackout' ? Math.max(4, pendingThreat.rating - 1) : pendingThreat.rating, threatAdvantageTotals.targetNumberModifier)
+    const requiredSuccesses = adjustedRequiredSuccesses(action === 'fight' ? 2 : 1, threatAdvantageTotals.requiredSuccessModifier)
+    const dicePool = Math.max(1, computerSkill + effectiveHackingPool + threatAdvantageTotals.diceBonus)
     const dice = Array.from({ length: dicePool }, () => rollOpenD6(targetNumber))
     const successes = dice.filter((die) => die >= targetNumber).length
     const passed = successes >= requiredSuccesses
@@ -1204,6 +1317,24 @@ function App() {
       {deferredThreats.length > 0 && <section className="deferred-threats"><span>Suppressed IC queued</span>{deferredThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Returns at Tally {threat.threshold} · {icClassForThreat(threat.type).toUpperCase()} IC</small></article>)}</section>}
       {(dfPoolReserve > 0 || poolLocks.length > 0) && <section className="pool-allocations"><span>Pool allocations</span>{dfPoolReserve > 0 && <article><strong>Detection Factor reserve</strong><small>{dfPoolReserve} Hacking Pool dice reserved · effective DF {effectiveDetectionFactor}</small></article>}{poolLocks.map((lock) => <article key={lock.id}><strong>{lock.reason}: {lock.label}</strong><small>{lock.dice} Hacking Pool die/dice tied up until {lock.sourceThreatId ? 'the IC returns' : 'reset/end'}</small></article>)}</section>}
 
+      <section className="gm-panel">
+        <div>
+          <p className="kicker">GM / table modifiers</p>
+          <h2>Run advantages</h2>
+          <p className="micro">Add keys, passcodes, physical access, or table rulings that change tested rolls. Leave applies-to blank for all tested rolls, or use comma-separated test IDs like staffRecords, controlSlave, threatCheckpoint.</p>
+        </div>
+        <div className="advantage-form">
+          <label>Name<input value={manualAdvantageName} onChange={(event) => setManualAdvantageName(event.target.value)} /></label>
+          <label>Reason<input value={manualAdvantageReason} onChange={(event) => setManualAdvantageReason(event.target.value)} placeholder="employee passcode, stolen keycard, hidden password" /></label>
+          <label>Bonus dice<input type="number" value={manualDiceBonus} onChange={(event) => setManualDiceBonus(Number(event.target.value))} /></label>
+          <label>TN modifier<input type="number" value={manualTargetNumberModifier} onChange={(event) => setManualTargetNumberModifier(Number(event.target.value))} /></label>
+          <label>Required successes modifier<input type="number" value={manualRequiredSuccessModifier} onChange={(event) => setManualRequiredSuccessModifier(Number(event.target.value))} /></label>
+          <label>Applies to<input value={manualAppliesTo} onChange={(event) => setManualAppliesTo(event.target.value)} placeholder="blank = all tested rolls" /></label>
+        </div>
+        <button className="roll-button" onClick={addManualAdvantage}>Add run advantage</button>
+        {advantages.length > 0 && <div className="advantage-list">{advantages.map((advantage) => <article key={advantage.id}><strong>{advantage.name}</strong><span>{modifierSummary(advantage)} · {advantage.appliesTo.length ? `applies to ${advantage.appliesTo.join(', ')}` : 'applies to all tested rolls'} · {advantage.reason}</span><button onClick={() => removeAdvantage(advantage.id)}>Remove</button></article>)}</div>}
+      </section>
+
       <section className="crawl-layout">
         <section className={`node-card ${!runEnd && alertState !== 'normal' ? `alert-${alertState}` : ''}`}>
           <p className="kicker">Current node</p>
@@ -1246,7 +1377,7 @@ function App() {
               <label>Hacking Pool total<input type="number" min="0" value={hackingPoolAvailable} onChange={(event) => setHackingPoolAvailable(Number(event.target.value))} /></label>
               <label>Pool reserved for DF<input type="number" min="0" max={maxDfPoolReserve} value={dfPoolReserve} onChange={(event) => setCrawl((current) => ({ ...current, dfPoolReserve: Math.min(Number(event.target.value), maxDfPoolReserve) }))} /></label>
             </div>
-            <p className="roll-formula">Effective roll pool: Computer {computerSkill} + free Hacking Pool {effectiveHackingPool} = {computerSkill + effectiveHackingPool} dice. {lockedPoolDice} pool dice tied up suppressing IC; {dfPoolReserve} reserved for Detection Factor.</p>
+            <p className="roll-formula">Effective roll pool: Computer {computerSkill} + free Hacking Pool {effectiveHackingPool}{threatAdvantagePreview.diceBonus ? ` + advantages ${threatAdvantagePreview.diceBonus}` : ''} = {computerSkill + effectiveHackingPool + threatAdvantagePreview.diceBonus} dice. Active advantages: {modifierSummary(threatAdvantagePreview)}. {lockedPoolDice} pool dice tied up suppressing IC; {dfPoolReserve} reserved for Detection Factor.</p>
             <div className="threat-actions">
               <button onClick={() => rollThreatCheckpoint('suppress')} disabled={!pendingThreatCanSuppress}><strong>Suppress / Evade</strong><span>{pendingThreatActionDetails?.suppress}</span></button>
               <button onClick={suppressThreatWithPool} disabled={effectiveHackingPool < 1 || !pendingThreatCanSuppress}><strong>Suppress with Pool</strong><span>{pendingThreatCanSuppress ? 'Tie up 1 free Hacking Pool die. WHITE IC returns at a blank higher Tally slot; the die frees when it returns.' : pendingThreatActionDetails?.suppress}</span></button>
@@ -1279,7 +1410,7 @@ function App() {
                   <label>Hacking Pool total<input type="number" min="0" value={hackingPoolAvailable} onChange={(event) => setHackingPoolAvailable(Number(event.target.value))} /></label>
                   <label>Pool reserved for DF<input type="number" min="0" max={maxDfPoolReserve} value={dfPoolReserve} onChange={(event) => setCrawl((current) => ({ ...current, dfPoolReserve: Math.min(Number(event.target.value), maxDfPoolReserve) }))} /></label>
                 </div>
-                <p className="roll-formula">Roll {selectedDicePool} dice vs TN {selectedTargetNumber}. {selectedRequiredSuccesses}+ success(es) unlock this route; zero or too few successes locks it and reveals nothing beyond. Base dice are Computer {computerSkill} + free Hacking Pool {effectiveHackingPool}. {lockedPoolDice} pool dice are tied up suppressing IC; {dfPoolReserve} are reserved for DF {effectiveDetectionFactor}. Relevant persona: {selectedPersona} {deck.persona[selectedPersona]}; best matching utility rating: {selectedUtility}. Host response check rolls {selectedChoice.securityValue ?? host.securityValue} dice vs DF {effectiveDetectionFactor} and may raise Tally{activeThreats.length ? `, plus ${activeThreats.length} active threat pressure` : ''}.</p>
+                <p className="roll-formula">Roll {selectedDicePool} dice vs TN {selectedTargetNumber}. {selectedRequiredSuccesses}+ success(es) unlock this route; zero or too few successes locks it and reveals nothing beyond. Base dice are Computer {computerSkill} + free Hacking Pool {effectiveHackingPool}; active advantages: {modifierSummary(selectedAdvantageTotals)}. {selectedBaseTargetNumber !== selectedTargetNumber || selectedBaseRequiredSuccesses !== selectedRequiredSuccesses ? `Base TN ${selectedBaseTargetNumber}, base successes ${selectedBaseRequiredSuccesses}. ` : ''}{lockedPoolDice} pool dice are tied up suppressing IC; {dfPoolReserve} are reserved for DF {effectiveDetectionFactor}. Relevant persona: {selectedPersona} {deck.persona[selectedPersona]}; best matching utility rating: {selectedUtility}. Host response check rolls {selectedChoice.securityValue ?? host.securityValue} dice vs DF {effectiveDetectionFactor} and may raise Tally{activeThreats.length ? `, plus ${activeThreats.length} active threat pressure` : ''}.</p>
                 <button className="roll-button" onClick={resolveSelectedChoice}>Roll to unlock this branch</button>
               </> : <button className="roll-button" onClick={resolveSelectedChoice}>Open this branch</button>}
             </div>}

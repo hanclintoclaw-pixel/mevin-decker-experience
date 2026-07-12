@@ -49,11 +49,36 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 - `securitySheaf[].encounter` is optional. Without it, the app infers IC type from the label (`Probe`, `Trace`, `Scramble`, `Tar Baby`, `Killer`, `Blaster`, `Sparky`, `Black`, `Psychotropic`, etc.). Encounter metadata can override `type`, `rating`, `terminalOnFail`, and GM-facing `consequence` text. The checkpoint UI explains what the IC type does and what the four response choices risk before the player commits.
 - Runs now end explicitly through graceful logoff, emergency jack out, objective completion, trace completion, shutdown/dumpshock, failed-jackout dumpshock, ICON/deck crash, black IC harm, or psychotropic consequence. The final card tells the player to alert the GM, summarizes recovered outcomes and unresolved threats, and provides a Discord-ready copyable run report including final Security Tally.
 - A successful featured action should either reveal a new node or give a specific decker-facing result, such as customer files, shipping records, camera access, or a note to tell/ask the GM.
+- Nodes may grant run-scoped `advantages`: targeted passcodes, keys, found passwords, or access tokens that modify later rolls.
 - Permanent outcomes such as altered records, recurring orders, disabled devices, planted files, or changed access must tell the player to notify the GM. Current-crawl lockouts are not permanent by default; after in-world time passes, the GM may allow a reset and retry.
 - `choice.unlockSuccesses` is optional and raises the success threshold for harder routes. Omit it for the default 1-success gate.
 - `choice.targetNumber` and `choice.securityValue` are optional per-choice overrides for hidden/deeper layers that are harder than the outer Host default.
 - Current app utility mapping recognizes starter IDs such as `logon`, `browsePublic`, `searchCustomer`, `staffRecords`, `alterStore`, `controlSlave`, `evadeTrace`, `fightIc`, `findUvSeam`, and `breachUv`.
 - Keep descriptions short enough for live-session scanning.
+
+## Run advantages
+
+A node can grant small targeted modifiers when the decker reaches it. Keep values simple: usually `targetNumberModifier: -1`, `diceBonus: 1`, or `requiredSuccessModifier: -1`.
+
+```json
+{
+  "id": "manager-terminal-password",
+  "title": "Password Note Found",
+  "kind": "reward",
+  "description": "You find a sticky-note passcode for staff records. Tell the GM you have it.",
+  "advantages": [
+    {
+      "name": "Staff records passcode",
+      "reason": "Password note hidden in the manager terminal",
+      "targetNumberModifier": -1,
+      "appliesTo": ["staffRecords", "logon"]
+    }
+  ],
+  "choices": []
+}
+```
+
+Supported fields are `name`, `reason`, `diceBonus`, `targetNumberModifier`, `requiredSuccessModifier`, and optional `appliesTo`. If `appliesTo` is omitted or empty, the advantage affects all tested rolls. The special test ID `threatCheckpoint` applies to IC checkpoint rolls.
 
 ## Wiki update workflow
 

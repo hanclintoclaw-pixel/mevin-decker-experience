@@ -94,7 +94,8 @@ h2 { margin: 0 0 0.8rem; }
 .status-grid small { display: block; }
 .active-threats,
 .deferred-threats,
-.pool-allocations {
+.pool-allocations,
+.gm-panel {
   display: grid;
   grid-template-columns: auto repeat(auto-fit, minmax(14rem, 1fr));
   align-items: center;
@@ -108,6 +109,13 @@ h2 { margin: 0 0 0.8rem; }
 .active-threats { border: 1px solid rgba(255, 111, 166, 0.38); background: rgba(255, 111, 166, 0.08); }
 .deferred-threats { border: 1px solid rgba(255, 189, 89, 0.40); background: rgba(255, 189, 89, 0.07); }
 .pool-allocations { border: 1px solid rgba(126, 231, 255, 0.34); background: rgba(126, 231, 255, 0.07); }
+.gm-panel { border: 1px solid rgba(210, 140, 255, 0.34); background: rgba(210, 140, 255, 0.07); grid-template-columns: 1fr; align-items: stretch; }
+.advantage-form { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+.advantage-list { display: grid; gap: 0.65rem; }
+.advantage-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.45rem 0.75rem; align-items: center; border: 1px solid rgba(210, 140, 255, 0.24); background: rgba(8, 5, 20, 0.34); border-radius: 16px; padding: 0.75rem; }
+.advantage-list strong { display: block; }
+.advantage-list span { color: #cab7ff; font-size: 0.88rem; }
+.advantage-list button { grid-row: span 2; padding: 0.55rem 0.75rem; }
 .active-threats > span, .deferred-threats > span, .pool-allocations > span { text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
 .active-threats > span { color: #ffb3cf; }
 .deferred-threats > span { color: #ffbd59; }
@@ -369,7 +377,8 @@ h2 { margin: 0 0 0.8rem; }
   .crawl-hero { flex-direction: column; }
   .loader-panel { grid-template-columns: 1fr; }
   .status-grid { grid-template-columns: 1fr 1fr; }
-  .active-threats, .deferred-threats, .pool-allocations { grid-template-columns: 1fr; }
+  .active-threats, .deferred-threats, .pool-allocations, .gm-panel { grid-template-columns: 1fr; }
+  .advantage-form { grid-template-columns: 1fr 1fr; }
   .crawl-layout { grid-template-columns: 1fr; }
   .roll-grid, .threat-actions, .run-summary-grid, .run-report-actions { grid-template-columns: 1fr; }
   .log-panel { max-height: none; }
@@ -386,4 +395,6 @@ h2 { margin: 0 0 0.8rem; }
   .map-node { width: 9.25rem; min-height: 3.75rem; padding: 0.6rem 0.7rem; }
   .map-node strong { font-size: 0.82rem; }
   .map-node span { font-size: 0.64rem; }
+  .advantage-form, .advantage-list article { grid-template-columns: 1fr; }
+  .advantage-list button { grid-row: auto; }
 }
