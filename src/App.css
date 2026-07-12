@@ -92,6 +92,7 @@ h2 { margin: 0 0 0.8rem; }
 .status-grid span { color: #7ee7ff; text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
 .status-grid strong { display: block; font-size: 1.2rem; margin: 0.2rem 0; }
 .status-grid small { display: block; }
+.alert-state,
 .active-threats,
 .pool-allocations {
   display: grid;
@@ -102,6 +103,14 @@ h2 { margin: 0 0 0.8rem; }
   padding: 0.8rem 1rem;
   margin: 1rem 0;
 }
+.alert-state.passive { border: 1px solid rgba(255, 189, 89, 0.52); background: rgba(41, 64, 28, 0.50); box-shadow: 0 0 24px rgba(255, 189, 89, 0.12); }
+.alert-state.active, .alert-state.shutdown { border: 1px solid rgba(255, 111, 166, 0.58); background: rgba(74, 13, 30, 0.58); box-shadow: 0 0 28px rgba(255, 111, 166, 0.18); }
+.alert-state article { border-left: 2px solid rgba(255, 189, 89, 0.60); padding-left: 0.75rem; }
+.alert-state.active article, .alert-state.shutdown article { border-left-color: rgba(255, 111, 166, 0.72); }
+.alert-state strong, .alert-state small { display: block; }
+.alert-state strong { color: #f5f0ff; text-transform: uppercase; letter-spacing: 0.10em; }
+.alert-light { width: 1.1rem; height: 1.1rem; border-radius: 50%; background: #ffbd59; box-shadow: 0 0 18px #ffbd59; animation: alert-pulse 1.1s ease-in-out infinite; }
+.alert-state.active .alert-light, .alert-state.shutdown .alert-light { background: #ff6fa6; box-shadow: 0 0 22px #ff6fa6; }
 .active-threats { border: 1px solid rgba(255, 111, 166, 0.38); background: rgba(255, 111, 166, 0.08); }
 .pool-allocations { border: 1px solid rgba(126, 231, 255, 0.34); background: rgba(126, 231, 255, 0.07); }
 .active-threats > span, .pool-allocations > span { text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
@@ -260,6 +269,11 @@ h2 { margin: 0 0 0.8rem; }
 .log-panel article.threat-entry { border-color: rgba(255, 189, 89, 0.42); background: rgba(255, 189, 89, 0.08); }
 .sheaf { color: #ffb3cf !important; }
 
+@keyframes alert-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
 @keyframes roll-pop {
   0% { opacity: 0; transform: scale(0.86) translateY(0.5rem); filter: blur(4px); }
   14% { opacity: 1; transform: scale(1.05) translateY(0); filter: blur(0); }
@@ -272,7 +286,7 @@ h2 { margin: 0 0 0.8rem; }
   .crawl-hero { flex-direction: column; }
   .loader-panel { grid-template-columns: 1fr; }
   .status-grid { grid-template-columns: 1fr 1fr; }
-  .active-threats, .pool-allocations { grid-template-columns: 1fr; }
+  .alert-state, .active-threats, .pool-allocations { grid-template-columns: 1fr; }
   .crawl-layout { grid-template-columns: 1fr; }
   .roll-grid, .threat-actions, .run-summary-grid, .run-report-actions { grid-template-columns: 1fr; }
   .log-panel { max-height: none; }

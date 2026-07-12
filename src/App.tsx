@@ -45,7 +45,8 @@ interface FlowNode {
 }
 
 type ThreatType = 'probe' | 'trace' | 'scramble' | 'tarBaby' | 'killer' | 'blaster' | 'sparky' | 'black' | 'psychotropic' | 'generic'
-type RunEndKind = 'gracefulLogoff' | 'emergencyJackOut' | 'iconCrashed' | 'traceCompleted' | 'blackIcHarm' | 'psychotropicHarm' | 'objectiveComplete'
+type RunEndKind = 'gracefulLogoff' | 'emergencyJackOut' | 'iconCrashed' | 'traceCompleted' | 'blackIcHarm' | 'psychotropicHarm' | 'objectiveComplete' | 'shutdownDumpshock' | 'failedJackoutDumpshock'
+type AlertState = 'normal' | 'passive' | 'active' | 'shutdown'
 
 interface SecuritySheafStep {
   threshold: number
@@ -67,6 +68,7 @@ interface HostProfile {
   securityCode: string
   securityValue: number
   hostRating: number
+  shutdownTally?: number
   subsystem: Record<string, number>
   taskTargetNumbers: Record<string, number>
   securitySheaf: SecuritySheafStep[]
@@ -438,6 +440,37 @@ function outcomeForNode(node: FlowNode): RunOutcome | undefined {
   }
 }
 
+function shutdownTallyForHost(host: HostProfile) {
+  if (host.shutdownTally && host.shutdownTally > 0) return host.shutdownTally
+  const lastSheafThreshold = host.securitySheaf.reduce((highest, step) => Math.max(highest, step.threshold), 0)
+  return Math.max(host.hostRating * 3, lastSheafThreshold + host.securityValue)
+}
+
+function alertStateForTally(securityTally: number, shutdownTally: number): AlertState {
+  if (securityTally >= shutdownTally) return 'shutdown'
+  if (securityTally >= Math.ceil((shutdownTally * 2) / 3)) return 'active'
+  if (securityTally >= Math.ceil(shutdownTally / 3)) return 'passive'
+  return 'normal'
+}
+
+function alertLabel(alertState: AlertState) {
+  if (alertState === 'passive') return 'Passive Alert'
+  if (alertState === 'active') return 'Active Alert'
+  if (alertState === 'shutdown') return 'Shutdown'
+  return 'Normal'
+}
+
+function dumpshockRunEnd(kind: 'shutdownDumpshock' | 'failedJackoutDumpshock', detail: string): RunEndState {
+  const title = kind === 'shutdownDumpshock' ? 'Host Shutdown / Dumpshock' : 'Failed Jack Out / Dumpshock'
+  return {
+    id: `run-end-${Date.now()}`,
+    kind,
+    title,
+    detail,
+    notifyGm: `RUN OVER — alert the GM: ${title}. Resolve dumpshock as close to SR3 RAW as the table wants; the decker has been forcibly dumped from the host and may suffer disorientation/stun or harsher IC-linked consequences at GM discretion.`,
+  }
+}
+
 function runEndForNode(node: FlowNode, activeThreats: ThreatCheckpoint[]): RunEndState | undefined {
   if (node.kind !== 'exit' && node.choices.length > 0) return undefined
   return {
@@ -458,6 +491,8 @@ function runEndForThreat(threat: ThreatCheckpoint, kind: RunEndKind): RunEndStat
     blackIcHarm: 'Black IC Harm',
     psychotropicHarm: 'Psychotropic IC Consequence',
     objectiveComplete: 'Run Objective Complete',
+    shutdownDumpshock: 'Host Shutdown / Dumpshock',
+    failedJackoutDumpshock: 'Failed Jack Out / Dumpshock',
   }
   return {
     id: `run-end-${Date.now()}`,
@@ -470,12 +505,13 @@ function runEndForThreat(threat: ThreatCheckpoint, kind: RunEndKind): RunEndStat
 
 function buildRunReport(host: HostProfile, deck: DeckRuntime, crawl: CrawlState, runEnd: RunEndState, outcomes: RunOutcome[], activeThreats: ThreatCheckpoint[], poolLocks: PoolLock[], dfPoolReserve: number) {
   const dfBonus = dfBonusFromReserve(dfPoolReserve)
+  const shutdownTally = shutdownTallyForHost(host)
   const lines = [
     `RUN OVER — ALERT THE GM`,
     `Host: ${host.name}`,
     `Deck/Icon: ${deck.sourceName} (${deck.handle})`,
     `Final outcome: ${runEnd.title}`,
-    `Final Security Tally: ${crawl.securityTally}`,
+    `Final Security Tally: ${crawl.securityTally} / ${shutdownTally}`,
     `Hacking Pool tied up: ${poolLockTotal(poolLocks) + dfPoolReserve}`,
     `Effective Detection Factor: ${deck.detectionFactor + dfBonus}${dfBonus > 0 ? ` (base ${deck.detectionFactor} + ${dfBonus} from reserved pool)` : ''}`,
     `Outcome detail: ${runEnd.detail}`,
@@ -521,6 +557,10 @@ function App() {
   const effectiveDetectionFactor = deck.detectionFactor + dfBonus
   const totalCommittedPool = lockedPoolDice + dfPoolReserve
   const maxDfPoolReserve = Math.min(6, Math.max(0, hackingPoolAvailable - lockedPoolDice))
+  const shutdownTally = shutdownTallyForHost(host)
+  const alertState = alertStateForTally(crawl.securityTally, shutdownTally)
+  const passiveAlertAt = Math.ceil(shutdownTally / 3)
+  const activeAlertAt = Math.ceil((shutdownTally * 2) / 3)
   const nextSheaf = host.securitySheaf.find((step) => step.threshold > crawl.securityTally)
   const selectedChoice = currentNode.choices[selectedChoiceIndex]
   const selectedChoiceGate = selectedChoice ? choiceGates[choiceKey(currentNode.id, selectedChoiceIndex)] : undefined
@@ -732,7 +772,8 @@ function App() {
       const destinationNode = host.flow.nodes.find((node) => node.id === selectedChoice.to)
       const nodeOutcome = passed && destinationNode ? outcomeForNode(destinationNode) : undefined
       const nextOutcomes = nodeOutcome && !(current.outcomes ?? []).some((existing) => existing.id === nodeOutcome.id) ? [...(current.outcomes ?? []), nodeOutcome] : (current.outcomes ?? [])
-      const runEnd = passed && destinationNode ? runEndForNode(destinationNode, current.activeThreats ?? []) : undefined
+      const shutdownRunEnd = after >= shutdownTally ? dumpshockRunEnd('shutdownDumpshock', `Security Tally reached ${after}/${shutdownTally}. The host shuts down the run and forcibly dumps the decker.`) : undefined
+      const runEnd = shutdownRunEnd ?? (passed && destinationNode ? runEndForNode(destinationNode, current.activeThreats ?? []) : undefined)
       return {
         currentNodeId: passed ? selectedChoice.to : from,
         visitedNodeIds: passed ? unique([...current.visitedNodeIds, selectedChoice.to]) : current.visitedNodeIds,
@@ -787,15 +828,18 @@ function App() {
 
     setCrawl((current) => {
       const remainingThreats = (current.pendingThreats ?? []).slice(1)
-      const activatedThreat = passed || failedTerminalKind ? [] : [{ ...pendingThreat, status: 'active' as const }]
+      const activatedThreat = passed || failedTerminalKind || (action === 'jackout' && !passed) ? [] : [{ ...pendingThreat, status: 'active' as const }]
       const emergencyJackOut = passed && action === 'jackout'
-      const runEnd = failedTerminalKind ? runEndForThreat(pendingThreat, failedTerminalKind) : emergencyJackOut ? {
+      const failedJackout = !passed && action === 'jackout'
+      const after = current.securityTally + tallyIncrease
+      const shutdownRunEnd = after >= shutdownTally ? dumpshockRunEnd('shutdownDumpshock', `Security Tally reached ${after}/${shutdownTally}. The host shuts down the run and forcibly dumps the decker.`) : undefined
+      const runEnd = shutdownRunEnd ?? (failedJackout ? dumpshockRunEnd('failedJackoutDumpshock', `${pendingThreat.label} caught the decker during a failed jackout attempt.`) : failedTerminalKind ? runEndForThreat(pendingThreat, failedTerminalKind) : emergencyJackOut ? {
         id: `run-end-${Date.now()}`,
         kind: 'emergencyJackOut' as const,
         title: 'Emergency Jack Out',
         detail: `${pendingThreat.label} was handled by cutting the run short.`,
         notifyGm: 'RUN OVER — alert the GM: emergency jack out before completing a graceful host logoff.',
-      } : current.runEnd
+      } : current.runEnd)
       return {
         ...current,
         currentNodeId: emergencyJackOut && logoffNode ? logoffNode.id : current.currentNodeId,
@@ -804,7 +848,7 @@ function App() {
         pendingThreats: remainingThreats,
         activeThreats: [...(current.activeThreats ?? []), ...activatedThreat],
         runEnd,
-        securityTally: current.securityTally + tallyIncrease,
+        securityTally: after,
         path: [entry, ...current.path].slice(0, 60),
       }
     })
@@ -910,10 +954,11 @@ function App() {
       <section className="status-grid">
         <article><span>Deck</span><strong>{deck.sourceName}</strong><small>{deck.handle} · DF {effectiveDetectionFactor}{dfPoolReserve > 0 ? ` (${deck.detectionFactor}+${effectiveDetectionFactor - deck.detectionFactor})` : ''} · Pool {effectiveHackingPool}/{hackingPoolAvailable} free, {totalCommittedPool} committed</small></article>
         <article><span>Matrix host</span><strong>{host.name}</strong><small>{host.securityCode.toUpperCase()}-{host.securityValue}</small></article>
-        <article><span>Tally</span><strong>{crawl.securityTally}</strong><small>{runEnd ? 'Run over' : pendingThreat ? `Checkpoint: ${pendingThreat.label}` : nextSheaf ? `Next: ${nextSheaf.threshold} ${nextSheaf.label}` : 'End / GM escalation'}</small></article>
+        <article><span>Tally</span><strong>{crawl.securityTally}/{shutdownTally}</strong><small>{runEnd ? 'Run over' : pendingThreat ? `Checkpoint: ${pendingThreat.label}` : nextSheaf ? `Next: ${nextSheaf.threshold} ${nextSheaf.label}` : 'End / GM escalation'}</small></article>
         <article><span>Location</span><strong>{runEnd ? runEnd.title : currentNode.title}</strong><small>{activeThreats.length ? `${activeThreats.length} active threat(s)` : currentNode.kind}</small></article>
       </section>
 
+      {alertState !== 'normal' && !runEnd && <section className={`alert-state ${alertState}`}><span className="alert-light" /><article><strong>{alertLabel(alertState)}</strong><small>{alertState === 'passive' ? `Security Tally has reached at least one-third of shutdown (${passiveAlertAt}/${shutdownTally}). The host is suspicious.` : alertState === 'active' ? `Security Tally has reached at least two-thirds of shutdown (${activeAlertAt}/${shutdownTally}). The host is actively responding.` : `Security Tally has reached shutdown (${shutdownTally}).`}</small></article></section>}
       {activeThreats.length > 0 && <section className="active-threats"><span>Active pressure</span>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Rating {threat.rating} · {descriptionForThreat(threat.type)}</small></article>)}</section>}
       {(dfPoolReserve > 0 || poolLocks.length > 0) && <section className="pool-allocations"><span>Pool allocations</span>{dfPoolReserve > 0 && <article><strong>Detection Factor reserve</strong><small>{dfPoolReserve} Hacking Pool dice reserved · effective DF {effectiveDetectionFactor}</small></article>}{poolLocks.map((lock) => <article key={lock.id}><strong>{lock.reason}: {lock.label}</strong><small>{lock.dice} Hacking Pool die/dice tied up until reset/end</small></article>)}</section>}
 
@@ -934,7 +979,7 @@ function App() {
             <p>{runEnd.detail}</p>
             <p className="notice">{runEnd.notifyGm}</p>
             <div className="run-summary-grid">
-              <article><span>Final Tally</span><strong>{crawl.securityTally}</strong></article>
+              <article><span>Final Tally</span><strong>{crawl.securityTally}/{shutdownTally}</strong></article>
               <article><span>Recovered / changed</span><strong>{outcomes.length}</strong></article>
               <article><span>Active threats</span><strong>{activeThreats.length}</strong></article>
             </div>

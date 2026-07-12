@@ -13,6 +13,7 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
   "securityCode": "green",
   "securityValue": 4,
   "hostRating": 4,
+  "shutdownTally": 18,
   "subsystem": { "access": 4, "control": 3, "index": 4, "files": 4, "slave": 3 },
   "taskTargetNumbers": { "logon": 4, "browsePublic": 4 },
   "securitySheaf": [{ "threshold": 2, "label": "Probe IC", "effect": "Host starts checking the decker icon.", "encounter": { "type": "probe", "rating": 4 } }],
@@ -42,9 +43,11 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 - Each private-side node should usually have 1-4 core featured `choices`. Existing 2-choice profiles remain valid; a 1-choice node is appropriate for a single locked door or terminal if it also provides a way to back out nearby.
 - A node may have a fifth choice only when that last choice is a back-out, return, retreat, or logoff option.
 - Tested choices are gated: by default, 1+ success unlocks and reveals the target node; failure locks that choice for the current crawl and reveals nothing beyond it.
+- `shutdownTally` is optional. If omitted, the app infers it from the host rating and final sheaf threshold.
+- The app shows **Passive Alert** at roughly one-third of Shutdown and **Active Alert** at roughly two-thirds. Reaching Shutdown ends the run with dumpshock.
 - When Security Tally crosses a `securitySheaf` threshold, the app pauses normal navigation with a checkpoint. The player can suppress/evade, fight, ignore, or jack out; ignored or failed checkpoints become active pressure that adds Tally risk to later tested actions.
 - `securitySheaf[].encounter` is optional. Without it, the app infers IC type from the label (`Probe`, `Trace`, `Scramble`, `Tar Baby`, `Killer`, `Blaster`, `Sparky`, `Black`, `Psychotropic`, etc.). Encounter metadata can override `type`, `rating`, `terminalOnFail`, and GM-facing `consequence` text. The checkpoint UI explains what the IC type does and what the four response choices risk before the player commits.
-- Runs now end explicitly through graceful logoff, emergency jack out, objective completion, trace completion, ICON/deck crash, black IC harm, or psychotropic consequence. The final card tells the player to alert the GM, summarizes recovered outcomes and unresolved threats, and provides a Discord-ready copyable run report including final Security Tally.
+- Runs now end explicitly through graceful logoff, emergency jack out, objective completion, trace completion, shutdown/dumpshock, failed-jackout dumpshock, ICON/deck crash, black IC harm, or psychotropic consequence. The final card tells the player to alert the GM, summarizes recovered outcomes and unresolved threats, and provides a Discord-ready copyable run report including final Security Tally.
 - A successful featured action should either reveal a new node or give a specific decker-facing result, such as customer files, shipping records, camera access, or a note to tell/ask the GM.
 - Permanent outcomes such as altered records, recurring orders, disabled devices, planted files, or changed access must tell the player to notify the GM. Current-crawl lockouts are not permanent by default; after in-world time passes, the GM may allow a reset and retry.
 - `choice.unlockSuccesses` is optional and raises the success threshold for harder routes. Omit it for the default 1-success gate.
