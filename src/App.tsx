@@ -312,6 +312,7 @@ function buildHostMapLayout(host: HostProfile): HostMapLayout {
   const nodeOrder = new Map(host.flow.nodes.map((node, index) => [node.id, index]))
   const nodeById = new Map(host.flow.nodes.map((node) => [node.id, node]))
   const depthById = new Map<string, number>([[host.flow.startNodeId, 0]])
+  const parentById = new Map<string, { from: string; label: string }>()
   const queue = [host.flow.startNodeId]
 
   while (queue.length > 0) {
@@ -321,10 +322,11 @@ function buildHostMapLayout(host: HostProfile): HostMapLayout {
     if (!node) continue
     const nextDepth = (depthById.get(nodeId) ?? 0) + 1
     for (const choice of node.choices) {
-      if (!nodeById.has(choice.to)) continue
+      if (!nodeById.has(choice.to) || choice.to === node.id) continue
       const existingDepth = depthById.get(choice.to)
       if (existingDepth !== undefined && existingDepth <= nextDepth) continue
       depthById.set(choice.to, nextDepth)
+      parentById.set(choice.to, { from: node.id, label: choice.label })
       queue.push(choice.to)
     }
   }
@@ -359,20 +361,12 @@ function buildHostMapLayout(host: HostProfile): HostMapLayout {
   })
 
   const mapNodeById = new Map(mapNodes.map((mapNode) => [mapNode.node.id, mapNode]))
-  const edgeKeys = new Set<string>()
-  const edges: HostMapEdge[] = []
-  for (const node of host.flow.nodes) {
-    const from = mapNodeById.get(node.id)
-    if (!from) continue
-    for (const choice of node.choices) {
-      const to = mapNodeById.get(choice.to)
-      if (!to || from.node.id === to.node.id) continue
-      const key = `${from.node.id}->${to.node.id}`
-      if (edgeKeys.has(key)) continue
-      edgeKeys.add(key)
-      edges.push({ from: from.node.id, to: to.node.id, label: choice.label, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y })
-    }
-  }
+  const edges: HostMapEdge[] = [...parentById.entries()].flatMap(([toId, parent]) => {
+    const from = mapNodeById.get(parent.from)
+    const to = mapNodeById.get(toId)
+    if (!from || !to) return []
+    return [{ from: from.node.id, to: to.node.id, label: parent.label, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y }]
+  })
 
   return { nodes: mapNodes, edges, heightRem: Math.max(24, (maxDepth + 2) * 8) }
 }
@@ -1270,7 +1264,10 @@ function App() {
                 const fromRevealed = revealedNodeIds.includes(edge.from)
                 const toRevealed = revealedNodeIds.includes(edge.to)
                 const edgeState = fromVisited && toVisited ? 'found' : fromRevealed && toRevealed ? 'revealed' : 'hidden'
-                return <line key={`${edge.from}-${edge.to}`} className={`map-edge ${edgeState}`} x1={edge.fromX} y1={edge.fromY + 3} x2={edge.toX} y2={edge.toY - 3} markerEnd="url(#map-arrow)" />
+                const fromY = Math.min(100, edge.fromY + 4.5)
+                const toY = Math.max(0, edge.toY - 4.5)
+                const midY = (fromY + toY) / 2
+                return <path key={`${edge.from}-${edge.to}`} className={`map-edge ${edgeState}`} d={`M ${edge.fromX} ${fromY} V ${midY} H ${edge.toX} V ${toY}`} markerEnd="url(#map-arrow)" />
               })}
             </svg>
             {hostMap.nodes.map((mapNode) => {
