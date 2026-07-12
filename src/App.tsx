@@ -162,6 +162,8 @@ interface CrawlState {
 }
 
 const EMPTY_CHOICE_GATES: Record<string, ChoiceGateState> = {}
+const EMPTY_THREATS: ThreatCheckpoint[] = []
+const EMPTY_OUTCOMES: RunOutcome[] = []
 
 interface StoredAppState {
   version: 1
@@ -446,6 +448,25 @@ function runEndForThreat(threat: ThreatCheckpoint, kind: RunEndKind): RunEndStat
   }
 }
 
+function buildRunReport(host: HostProfile, deck: DeckRuntime, crawl: CrawlState, runEnd: RunEndState, outcomes: RunOutcome[], activeThreats: ThreatCheckpoint[]) {
+  const lines = [
+    `RUN OVER — ALERT THE GM`,
+    `Host: ${host.name}`,
+    `Deck/Icon: ${deck.sourceName} (${deck.handle})`,
+    `Final outcome: ${runEnd.title}`,
+    `Final Security Tally: ${crawl.securityTally}`,
+    `Outcome detail: ${runEnd.detail}`,
+    `GM notice: ${runEnd.notifyGm}`,
+    '',
+    `Recovered / changed outcomes (${outcomes.length}):`,
+    ...(outcomes.length > 0 ? outcomes.map((outcome, index) => `${index + 1}. ${outcome.title}${outcome.notifyGm ? ' — notify GM' : ''}: ${outcome.detail}`) : ['None recorded.']),
+    '',
+    `Unresolved IC / consequences (${activeThreats.length}):`,
+    ...(activeThreats.length > 0 ? activeThreats.map((threat, index) => `${index + 1}. ${threat.label} [${threat.type}, Rating ${threat.rating}]: ${threat.consequence}`) : ['None recorded.']),
+  ]
+  return lines.join('\n')
+}
+
 function App() {
   const [initialState] = useState(loadStoredAppState)
   const [deck, setDeck] = useState<DeckRuntime>(initialState.deck)
@@ -464,8 +485,8 @@ function App() {
   const revealedNodeIds = crawl.revealedNodeIds ?? crawl.visitedNodeIds
   const choiceGates = crawl.choiceGates ?? EMPTY_CHOICE_GATES
   const pendingThreat = crawl.pendingThreats?.[0]
-  const activeThreats = crawl.activeThreats ?? []
-  const outcomes = crawl.outcomes ?? []
+  const activeThreats = crawl.activeThreats ?? EMPTY_THREATS
+  const outcomes = crawl.outcomes ?? EMPTY_OUTCOMES
   const runEnd = crawl.runEnd
   const nextSheaf = host.securitySheaf.find((step) => step.threshold > crawl.securityTally)
   const selectedChoice = currentNode.choices[selectedChoiceIndex]
@@ -476,6 +497,7 @@ function App() {
   const selectedTargetNumber = selectedChoice?.testId ? (selectedChoice.targetNumber ?? host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating) : undefined
   const selectedDicePool = selectedChoice?.testId ? Math.max(1, computerSkill + Math.min(hackingPoolCommit, hackingPoolAvailable)) : undefined
   const pendingThreatActionDetails = pendingThreat ? actionDetailsForThreat(pendingThreat) : undefined
+  const runReport = useMemo(() => runEnd ? buildRunReport(host, deck, crawl, runEnd, outcomes, activeThreats) : '', [activeThreats, crawl, deck, host, outcomes, runEnd])
 
   useEffect(() => {
     const selectedKey = choiceKey(currentNode.id, selectedChoiceIndex)
@@ -806,6 +828,15 @@ function App() {
     setMessage('Custom action recorded for GM adjudication; call for the RAW test or consequence that fits the table.')
   }
 
+  function copyRunReport() {
+    if (!runReport) return
+    void navigator.clipboard.writeText(runReport).then(() => {
+      setMessage('Run report copied for Discord / GM handoff.')
+    }).catch(() => {
+      setMessage('Copy failed; select the run report text manually.')
+    })
+  }
+
   function resetCrawl() {
     setCrawl(freshCrawl(host))
     setSelectedChoiceIndex(0)
@@ -884,7 +915,14 @@ function App() {
             </div>
             {outcomes.length > 0 && <div className="run-summary-list"><h4>Tell the GM / note for later</h4>{outcomes.map((outcome) => <article key={outcome.id}><strong>{outcome.title}</strong><p>{outcome.detail}</p>{outcome.notifyGm && <small>Notify the GM.</small>}</article>)}</div>}
             {activeThreats.length > 0 && <div className="run-summary-list danger"><h4>Unresolved IC / consequences</h4>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><p>{threat.consequence}</p></article>)}</div>}
-            <button className="roll-button" onClick={exportCrawl}>Export final log</button>
+            <div className="run-report-box">
+              <label htmlFor="run-report">Discord-ready run report</label>
+              <textarea id="run-report" readOnly value={runReport} rows={Math.min(18, Math.max(10, runReport.split('\n').length))} />
+              <div className="run-report-actions">
+                <button onClick={copyRunReport}>Copy run report</button>
+                <button onClick={exportCrawl}>Export final log</button>
+              </div>
+            </div>
           </div> : pendingThreat ? <div className="threat-checkpoint">
             <p className="kicker">Security checkpoint</p>
             <h3>{pendingThreat.label}</h3>
