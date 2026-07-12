@@ -92,20 +92,24 @@ h2 { margin: 0 0 0.8rem; }
 .status-grid span { color: #7ee7ff; text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
 .status-grid strong { display: block; font-size: 1.2rem; margin: 0.2rem 0; }
 .status-grid small { display: block; }
-.active-threats {
+.active-threats,
+.pool-allocations {
   display: grid;
   grid-template-columns: auto repeat(auto-fit, minmax(14rem, 1fr));
   align-items: center;
   gap: 0.75rem;
-  border: 1px solid rgba(255, 111, 166, 0.38);
-  background: rgba(255, 111, 166, 0.08);
   border-radius: 22px;
   padding: 0.8rem 1rem;
   margin: 1rem 0;
 }
-.active-threats > span { color: #ffb3cf; text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
-.active-threats article { border-left: 2px solid rgba(255, 111, 166, 0.48); padding-left: 0.75rem; }
-.active-threats strong, .active-threats small { display: block; }
+.active-threats { border: 1px solid rgba(255, 111, 166, 0.38); background: rgba(255, 111, 166, 0.08); }
+.pool-allocations { border: 1px solid rgba(126, 231, 255, 0.34); background: rgba(126, 231, 255, 0.07); }
+.active-threats > span, .pool-allocations > span { text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
+.active-threats > span { color: #ffb3cf; }
+.pool-allocations > span { color: #7ee7ff; }
+.active-threats article, .pool-allocations article { border-left: 2px solid rgba(126, 231, 255, 0.42); padding-left: 0.75rem; }
+.active-threats article { border-left-color: rgba(255, 111, 166, 0.48); }
+.active-threats strong, .active-threats small, .pool-allocations strong, .pool-allocations small { display: block; }
 
 .crawl-layout { display: grid; grid-template-columns: 280px 1fr 360px; gap: 1rem; }
 .node-map { display: grid; gap: 0.6rem; align-content: start; }
@@ -278,7 +282,7 @@ h2 { margin: 0 0 0.8rem; }
   .crawl-hero { flex-direction: column; }
   .loader-panel { grid-template-columns: 1fr; }
   .status-grid { grid-template-columns: 1fr 1fr; }
-  .active-threats { grid-template-columns: 1fr; }
+  .active-threats, .pool-allocations { grid-template-columns: 1fr; }
   .crawl-layout { grid-template-columns: 1fr; }
   .roll-grid, .custom-action-row, .threat-actions, .run-summary-grid, .run-report-actions { grid-template-columns: 1fr; }
   .log-panel { max-height: none; }

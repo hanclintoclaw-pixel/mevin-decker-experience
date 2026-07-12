@@ -62,3 +62,7 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 6. Load the Host Library in the Decker Experience, click the Host, or paste the individual URL with **Fetch Scenario**. Download the file and use **Import Scenario JSON** if URL fetch is unavailable.
 
 The mechanics are a provisional SR3-inspired tabletop aid. Treat Security Tally and sheaf events as prompts for GM adjudication, not a full rules replacement.
+
+## Hacking Pool abstraction
+
+The app auto-adds free Hacking Pool to tested action rolls to reduce per-roll math. Hacking Pool remains visible as a separate value. Players can lower the effective pool for the current run by reserving dice for Detection Factor or by suppressing a checkpoint IC with a pool die. These allocations remain visible and last until reset/end in the current abstraction.
