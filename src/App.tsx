@@ -238,6 +238,18 @@ const HOST_INDEX_URL = 'https://hanclintoclaw-pixel.github.io/campaign-wiki/data
 const HAPPY_CAT_URL = 'https://hanclintoclaw-pixel.github.io/campaign-wiki/data/matrix-hosts/happy-cat-public-storefront-host.json'
 const GRACEFUL_LOGOFF_NODE_ID = '__front-door-graceful-logoff__'
 const GRACEFUL_LOGOFF_CHOICE: FlowChoice = { label: 'Graceful Logoff', to: GRACEFUL_LOGOFF_NODE_ID }
+const IC_ICON_BY_TYPE: Record<ThreatType, { fileName: string; label: string }> = {
+  probe: { fileName: 'probe.png', label: 'Probe IC' },
+  trace: { fileName: 'trace.png', label: 'Trace IC' },
+  scramble: { fileName: 'scramble.png', label: 'Scramble IC' },
+  tarBaby: { fileName: 'tar-baby.png', label: 'Tar Baby IC' },
+  killer: { fileName: 'killer.png', label: 'Killer IC' },
+  blaster: { fileName: 'blaster.png', label: 'Blaster IC' },
+  sparky: { fileName: 'sparky.png', label: 'Sparky IC' },
+  black: { fileName: 'black-ic.png', label: 'Black IC' },
+  psychotropic: { fileName: 'psycho.png', label: 'Psychotropic IC' },
+  generic: { fileName: 'pressure.png', label: 'Security pressure' },
+}
 
 const seedDeck: DeckRuntime = {
   sourceName: 'Starter fallback deck',
@@ -594,6 +606,16 @@ function descriptionForThreat(type: ThreatType) {
     generic: 'This is active host security pressure. If left active, it increases risk on future tested actions and should be reported if still active when the run ends.',
   }
   return descriptions[type]
+}
+
+function iconForThreat(type: ThreatType) {
+  const icon = IC_ICON_BY_TYPE[type]
+  return { ...icon, src: `${import.meta.env.BASE_URL}ic-icons/${icon.fileName}` }
+}
+
+function ThreatIcon({ type, className = '' }: { type: ThreatType; className?: string }) {
+  const icon = iconForThreat(type)
+  return <img className={`ic-icon ${className}`.trim()} src={icon.src} alt={`${icon.label} icon`} loading="lazy" />
 }
 
 function actionDetailsForThreat(threat: ThreatCheckpoint) {
@@ -1313,8 +1335,8 @@ function App() {
         <article><span>Location</span><strong>{runEnd ? runEnd.title : currentNode.title}</strong><small>{activeThreats.length ? `${activeThreats.length} active threat(s)` : deferredThreats.length ? `${deferredThreats.length} suppressed IC queued` : currentNode.kind}</small></article>
       </section>
 
-      {activeThreats.length > 0 && <section className="active-threats"><span>Active pressure</span>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Rating {threat.rating} · {descriptionForThreat(threat.type)}</small></article>)}</section>}
-      {deferredThreats.length > 0 && <section className="deferred-threats"><span>Suppressed IC queued</span>{deferredThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Returns at Tally {threat.threshold} · {icClassForThreat(threat.type).toUpperCase()} IC</small></article>)}</section>}
+      {activeThreats.length > 0 && <section className="active-threats"><span>Active pressure</span>{activeThreats.map((threat) => <article key={threat.id} className="threat-summary"><ThreatIcon type={threat.type} /><div><strong>{threat.label}</strong><small>Rating {threat.rating} · {descriptionForThreat(threat.type)}</small></div></article>)}</section>}
+      {deferredThreats.length > 0 && <section className="deferred-threats"><span>Suppressed IC queued</span>{deferredThreats.map((threat) => <article key={threat.id} className="threat-summary"><ThreatIcon type={threat.type} /><div><strong>{threat.label}</strong><small>Returns at Tally {threat.threshold} · {icClassForThreat(threat.type).toUpperCase()} IC</small></div></article>)}</section>}
       {(dfPoolReserve > 0 || poolLocks.length > 0) && <section className="pool-allocations"><span>Pool allocations</span>{dfPoolReserve > 0 && <article><strong>Detection Factor reserve</strong><small>{dfPoolReserve} Hacking Pool dice reserved · effective DF {effectiveDetectionFactor}</small></article>}{poolLocks.map((lock) => <article key={lock.id}><strong>{lock.reason}: {lock.label}</strong><small>{lock.dice} Hacking Pool die/dice tied up until {lock.sourceThreatId ? 'the IC returns' : 'reset/end'}</small></article>)}</section>}
 
       <section className="gm-panel">
@@ -1353,7 +1375,7 @@ function App() {
               <article><span>Active threats</span><strong>{activeThreats.length}</strong></article>
             </div>
             {outcomes.length > 0 && <div className="run-summary-list"><h4>Tell the GM / note for later</h4>{outcomes.map((outcome) => <article key={outcome.id}><strong>{outcome.title}</strong><p>{outcome.detail}</p>{outcome.notifyGm && <small>Notify the GM.</small>}</article>)}</div>}
-            {activeThreats.length > 0 && <div className="run-summary-list danger"><h4>Unresolved IC / consequences</h4>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><p>{threat.consequence}</p></article>)}</div>}
+            {activeThreats.length > 0 && <div className="run-summary-list danger"><h4>Unresolved IC / consequences</h4>{activeThreats.map((threat) => <article key={threat.id} className="threat-summary"><ThreatIcon type={threat.type} /><div><strong>{threat.label}</strong><p>{threat.consequence}</p></div></article>)}</div>}
             <div className="run-report-box">
               <label htmlFor="run-report">Discord-ready run report</label>
               <textarea id="run-report" readOnly value={runReport} rows={Math.min(18, Math.max(10, runReport.split('\n').length))} />
@@ -1367,9 +1389,12 @@ function App() {
             <h3>{pendingThreat.label}</h3>
             <p>{pendingThreat.effect}</p>
             <div className="ic-context">
-              <strong>{icClassForThreat(pendingThreat.type).toUpperCase()} {pendingThreat.type} IC / security behavior</strong>
-              <span>{descriptionForThreat(pendingThreat.type)}</span>
-              <small>{pendingThreat.consequence}</small>
+              <ThreatIcon type={pendingThreat.type} className="checkpoint-icon" />
+              <div>
+                <strong>{icClassForThreat(pendingThreat.type).toUpperCase()} {pendingThreat.type} IC / security behavior</strong>
+                <span>{descriptionForThreat(pendingThreat.type)}</span>
+                <small>{pendingThreat.consequence}</small>
+              </div>
             </div>
             <p className="roll-formula">Rating {pendingThreat.rating}. Normal host choices pause until you handle this alert. Choose whether to clear it, fight it, carry it as active pressure, or end the run by jacking out.</p>
             <div className="roll-grid">
