@@ -6,6 +6,7 @@ declare const __SOURCE_COMMIT__: string
 
 type PersonaKey = 'bod' | 'evasion' | 'masking' | 'sensors'
 type UtilityCategory = 'attack' | 'defense' | 'stealth' | 'sensor' | 'control' | 'utility' | 'special'
+type IcClass = 'white' | 'gray' | 'black'
 
 interface DeckRuntime {
   sourceName: string
@@ -125,6 +126,7 @@ interface RollFeedback {
 
 interface ThreatCheckpoint {
   id: string
+  sourceId?: string
   threshold: number
   label: string
   effect: string
@@ -144,6 +146,7 @@ interface RunOutcome {
 
 interface PoolLock {
   id: string
+  sourceThreatId?: string
   label: string
   dice: number
   reason: string
@@ -164,6 +167,7 @@ interface CrawlState {
   choiceGates?: Record<string, ChoiceGateState>
   pendingThreats?: ThreatCheckpoint[]
   activeThreats?: ThreatCheckpoint[]
+  deferredThreats?: ThreatCheckpoint[]
   poolLocks?: PoolLock[]
   dfPoolReserve?: number
   outcomes?: RunOutcome[]
@@ -269,7 +273,7 @@ function dfBonusFromReserve(dfPoolReserve: number) {
 }
 
 function freshCrawl(host: HostProfile): CrawlState {
-  return { currentNodeId: host.flow.startNodeId, visitedNodeIds: [host.flow.startNodeId], revealedNodeIds: [host.flow.startNodeId], choiceGates: {}, pendingThreats: [], activeThreats: [], poolLocks: [], dfPoolReserve: 0, outcomes: [], securityTally: 0, path: [] }
+  return { currentNodeId: host.flow.startNodeId, visitedNodeIds: [host.flow.startNodeId], revealedNodeIds: [host.flow.startNodeId], choiceGates: {}, pendingThreats: [], activeThreats: [], deferredThreats: [], poolLocks: [], dfPoolReserve: 0, outcomes: [], securityTally: 0, path: [] }
 }
 
 function unique(values: string[]) {
@@ -291,6 +295,7 @@ function normalizeCrawl(crawl: CrawlState, host: HostProfile): CrawlState {
     choiceGates: crawl.choiceGates ?? {},
     pendingThreats: crawl.pendingThreats ?? [],
     activeThreats: crawl.activeThreats ?? [],
+    deferredThreats: crawl.deferredThreats ?? [],
     poolLocks: crawl.poolLocks ?? [],
     dfPoolReserve: crawl.dfPoolReserve ?? 0,
     outcomes: crawl.outcomes ?? [],
@@ -380,6 +385,21 @@ function threatTypeFromLabel(label: string): ThreatType {
   return 'generic'
 }
 
+function icClassForThreat(type: ThreatType): IcClass {
+  if (type === 'black' || type === 'psychotropic') return 'black'
+  if (type === 'tarBaby' || type === 'blaster' || type === 'sparky') return 'gray'
+  return 'white'
+}
+
+function canSuppressThreat(threat: ThreatCheckpoint) {
+  return icClassForThreat(threat.type) === 'white'
+}
+
+function suppressionBlockedText(threat: ThreatCheckpoint) {
+  const icClass = icClassForThreat(threat.type)
+  return `${icClass.toUpperCase()} IC cannot be suppressed in this tool. Fight it, ignore it, or jack out.`
+}
+
 function descriptionForThreat(type: ThreatType) {
   const descriptions: Record<ThreatType, string> = {
     probe: 'Probe/Scout IC studies your icon, credentials, and behavior. If left active, the host may identify your signature or make future security response more precise.',
@@ -399,8 +419,8 @@ function descriptionForThreat(type: ThreatType) {
 function actionDetailsForThreat(threat: ThreatCheckpoint) {
   const terminalKind = terminalKindForThreat(threat.type)
   return {
-    suppress: `Roll vs TN ${threat.rating}, need 1 success. On success, clear this checkpoint and continue. On failure, it becomes active pressure${threat.terminalOnFail && terminalKind ? ' or may end the run for severe IC' : ''}.`,
-    fight: `Roll vs TN ${threat.rating}, need 2 successes. Best for destructive IC, but failure can leave it active${threat.terminalOnFail && terminalKind ? ' or crash/end the run' : ''}.`,
+    suppress: canSuppressThreat(threat) ? `Roll vs TN ${threat.rating}, need 1 success. On success, WHITE IC is moved to a blank higher Security Tally slot and may return later. On failure, it becomes active pressure${threat.terminalOnFail && terminalKind ? ' or may end the run for severe IC' : ''}.` : suppressionBlockedText(threat),
+    fight: `Roll vs TN ${threat.rating}, need 2 successes. On success, crash and remove the IC from this run. Failure can leave it active${threat.terminalOnFail && terminalKind ? ' or crash/end the run' : ''}.`,
     ignore: threat.type === 'trace' ? 'Do not roll. Trace completes immediately and the run ends; alert the GM.' : 'Do not roll. Continue the run, but this IC stays active and adds +1 Tally pressure to future tested actions.',
     jackout: `Roll vs TN ${Math.max(4, threat.rating - 1)}, need 1 success. On success, end the run with Emergency Jack Out. On failure, the IC stays dangerous${threat.terminalOnFail && terminalKind ? ' and may force its terminal consequence' : ''}.`,
   }
@@ -458,6 +478,65 @@ function alertLabel(alertState: AlertState) {
   if (alertState === 'active') return 'Active Alert'
   if (alertState === 'shutdown') return 'Shutdown'
   return 'Normal'
+}
+
+function sourceThreatId(threat: ThreatCheckpoint) {
+  return threat.sourceId ?? threat.id
+}
+
+function threatFromSheafStep(step: SecuritySheafStep, host: HostProfile, securityValue?: number): ThreatCheckpoint {
+  const type = step.encounter?.type ?? threatTypeFromLabel(step.label)
+  return {
+    id: `threat-${step.threshold}-${step.label}`,
+    threshold: step.threshold,
+    label: step.label,
+    effect: step.effect,
+    rating: step.encounter?.rating ?? Math.max(securityValue ?? host.securityValue, Math.ceil(step.threshold / 2)),
+    type,
+    consequence: step.encounter?.consequence ?? consequenceForThreat(type, step.label),
+    terminalOnFail: step.encounter?.terminalOnFail ?? Boolean(terminalKindForThreat(type)),
+    status: 'pending',
+  }
+}
+
+function crossedSecurityLabels(host: HostProfile, deferredThreats: ThreatCheckpoint[], before: number, after: number) {
+  return [
+    ...host.securitySheaf.filter((step) => step.threshold > before && step.threshold <= after).map((step) => `${step.threshold}: ${step.label}`),
+    ...deferredThreats.filter((threat) => threat.threshold > before && threat.threshold <= after).map((threat) => `${threat.threshold}: ${threat.label} returns`),
+  ]
+}
+
+function nextSecurityEvent(host: HostProfile, crawl: CrawlState) {
+  return [
+    ...host.securitySheaf.map((step) => ({ threshold: step.threshold, label: step.label })),
+    ...(crawl.deferredThreats ?? []).map((threat) => ({ threshold: threat.threshold, label: `${threat.label} returns` })),
+  ].filter((event) => event.threshold > crawl.securityTally).sort((left, right) => left.threshold - right.threshold)[0]
+}
+
+function nextBlankSuppressionThreshold(host: HostProfile, crawl: CrawlState, threat: ThreatCheckpoint, shutdownTally: number) {
+  const occupied = new Set([
+    ...host.securitySheaf.map((step) => step.threshold),
+    ...(crawl.pendingThreats ?? []).map((existing) => existing.threshold),
+    ...(crawl.activeThreats ?? []).map((existing) => existing.threshold),
+    ...(crawl.deferredThreats ?? []).map((existing) => existing.threshold),
+  ])
+  for (let threshold = Math.max(crawl.securityTally + 1, threat.threshold + 1); threshold < shutdownTally; threshold += 1) {
+    if (!occupied.has(threshold)) return threshold
+  }
+  return undefined
+}
+
+function deferredThreatForSuppression(threat: ThreatCheckpoint, threshold: number): ThreatCheckpoint {
+  const originalId = sourceThreatId(threat)
+  return {
+    ...threat,
+    id: `deferred-${originalId}-${threshold}`,
+    sourceId: originalId,
+    threshold,
+    effect: `${threat.label} was suppressed/evaded earlier and has found a blank spot in the host response pattern. Deal with it again now or let it become active pressure.`,
+    consequence: `${threat.consequence} This IC was suppressed earlier and returned at Security Tally ${threshold}.`,
+    status: 'pending',
+  }
 }
 
 function dumpshockRunEnd(kind: 'shutdownDumpshock' | 'failedJackoutDumpshock', detail: string): RunEndState {
@@ -547,6 +626,7 @@ function App() {
   const choiceGates = crawl.choiceGates ?? EMPTY_CHOICE_GATES
   const pendingThreat = crawl.pendingThreats?.[0]
   const activeThreats = crawl.activeThreats ?? EMPTY_THREATS
+  const deferredThreats = crawl.deferredThreats ?? EMPTY_THREATS
   const poolLocks = crawl.poolLocks ?? EMPTY_POOL_LOCKS
   const outcomes = crawl.outcomes ?? EMPTY_OUTCOMES
   const runEnd = crawl.runEnd
@@ -561,7 +641,7 @@ function App() {
   const alertState = alertStateForTally(crawl.securityTally, shutdownTally)
   const passiveAlertAt = Math.ceil(shutdownTally / 3)
   const activeAlertAt = Math.ceil((shutdownTally * 2) / 3)
-  const nextSheaf = host.securitySheaf.find((step) => step.threshold > crawl.securityTally)
+  const nextSheaf = nextSecurityEvent(host, crawl)
   const selectedChoice = currentNode.choices[selectedChoiceIndex]
   const selectedChoiceGate = selectedChoice ? choiceGates[choiceKey(currentNode.id, selectedChoiceIndex)] : undefined
   const selectedRequiredSuccesses = selectedChoice?.testId ? Math.max(1, selectedChoice.unlockSuccesses ?? 1) : 0
@@ -570,6 +650,7 @@ function App() {
   const selectedTargetNumber = selectedChoice?.testId ? (selectedChoice.targetNumber ?? host.taskTargetNumbers[selectedChoice.testId] ?? host.hostRating) : undefined
   const selectedDicePool = selectedChoice?.testId ? Math.max(1, computerSkill + effectiveHackingPool) : undefined
   const pendingThreatActionDetails = pendingThreat ? actionDetailsForThreat(pendingThreat) : undefined
+  const pendingThreatCanSuppress = pendingThreat ? canSuppressThreat(pendingThreat) : false
   const runReport = useMemo(() => runEnd ? buildRunReport(host, deck, crawl, runEnd, outcomes, activeThreats, poolLocks, dfPoolReserve) : '', [activeThreats, crawl, deck, dfPoolReserve, host, outcomes, poolLocks, runEnd])
 
   useEffect(() => {
@@ -706,7 +787,7 @@ function App() {
       const securityDice = Array.from({ length: selectedChoice.securityValue ?? host.securityValue }, () => rollOpenD6(effectiveDetectionFactor))
       tallyIncrease = securityDice.filter((die) => die >= effectiveDetectionFactor).length + activeThreats.length
       const after = crawl.securityTally + tallyIncrease
-      sheaf = host.securitySheaf.filter((step) => step.threshold > crawl.securityTally && step.threshold <= after).map((step) => `${step.threshold}: ${step.label}`)
+      sheaf = crossedSecurityLabels(host, crawl.deferredThreats ?? [], crawl.securityTally, after)
     }
     const passed = !selectedChoice.testId || (successes ?? 0) >= selectedRequiredSuccesses
     const outcome = selectedChoice.testId ? (passed ? 'unlocked' : 'locked') : 'opened'
@@ -751,24 +832,18 @@ function App() {
         [selectedKey]: gateState,
       }
       const after = current.securityTally + tallyIncrease
-      const existingThreatIds = new Set([...(current.pendingThreats ?? []), ...(current.activeThreats ?? [])].map((threat) => threat.id))
-      const newThreats = host.securitySheaf
-        .filter((step) => step.threshold > current.securityTally && step.threshold <= after)
-        .map((step) => {
-          const type = step.encounter?.type ?? threatTypeFromLabel(step.label)
-          return {
-            id: `threat-${step.threshold}-${step.label}`,
-            threshold: step.threshold,
-            label: step.label,
-            effect: step.effect,
-            rating: step.encounter?.rating ?? Math.max(selectedChoice.securityValue ?? host.securityValue, Math.ceil(step.threshold / 2)),
-            type,
-            consequence: step.encounter?.consequence ?? consequenceForThreat(type, step.label),
-            terminalOnFail: step.encounter?.terminalOnFail ?? Boolean(terminalKindForThreat(type)),
-            status: 'pending' as const,
-          }
-        })
-        .filter((threat) => !existingThreatIds.has(threat.id))
+      const crossedDeferredThreats = (current.deferredThreats ?? []).filter((threat) => threat.threshold > current.securityTally && threat.threshold <= after)
+      const crossedDeferredSourceIds = new Set(crossedDeferredThreats.map(sourceThreatId))
+      const remainingDeferredThreats = (current.deferredThreats ?? []).filter((threat) => !crossedDeferredSourceIds.has(sourceThreatId(threat)))
+      const existingThreatIds = new Set([...(current.pendingThreats ?? []), ...(current.activeThreats ?? []), ...crossedDeferredThreats].map((threat) => threat.id))
+      const newThreats = [
+        ...host.securitySheaf
+          .filter((step) => step.threshold > current.securityTally && step.threshold <= after)
+          .map((step) => threatFromSheafStep(step, host, selectedChoice.securityValue))
+          .filter((threat) => !existingThreatIds.has(threat.id)),
+        ...crossedDeferredThreats,
+      ]
+      const nextPoolLocks = crossedDeferredSourceIds.size ? (current.poolLocks ?? []).filter((lock) => !lock.sourceThreatId || !crossedDeferredSourceIds.has(lock.sourceThreatId)) : (current.poolLocks ?? [])
       const destinationNode = host.flow.nodes.find((node) => node.id === selectedChoice.to)
       const nodeOutcome = passed && destinationNode ? outcomeForNode(destinationNode) : undefined
       const nextOutcomes = nodeOutcome && !(current.outcomes ?? []).some((existing) => existing.id === nodeOutcome.id) ? [...(current.outcomes ?? []), nodeOutcome] : (current.outcomes ?? [])
@@ -781,6 +856,9 @@ function App() {
         choiceGates: nextChoiceGates,
         pendingThreats: [...(current.pendingThreats ?? []), ...newThreats],
         activeThreats: current.activeThreats ?? [],
+        deferredThreats: remainingDeferredThreats,
+        poolLocks: nextPoolLocks,
+        dfPoolReserve: current.dfPoolReserve ?? 0,
         outcomes: nextOutcomes,
         runEnd: runEnd ?? current.runEnd,
         securityTally: after,
@@ -814,6 +892,10 @@ function App() {
 
   function rollThreatCheckpoint(action: 'suppress' | 'fight' | 'jackout') {
     if (!pendingThreat) return
+    if (action === 'suppress' && !canSuppressThreat(pendingThreat)) {
+      setMessage(suppressionBlockedText(pendingThreat))
+      return
+    }
     const targetNumber = action === 'jackout' ? Math.max(4, pendingThreat.rating - 1) : pendingThreat.rating
     const requiredSuccesses = action === 'fight' ? 2 : 1
     const dicePool = Math.max(1, computerSkill + effectiveHackingPool)
@@ -823,11 +905,13 @@ function App() {
     const tallyIncrease = passed ? 0 : 1
     const verb = action === 'suppress' ? 'Suppress IC' : action === 'fight' ? 'Cybercombat' : 'Jack Out'
     const entry = threatEntry(pendingThreat, verb, pendingThreat.label, dice, successes, targetNumber, requiredSuccesses, tallyIncrease)
+    const suppressionThreshold = action === 'suppress' && passed ? nextBlankSuppressionThreshold(host, crawl, pendingThreat, shutdownTally) : undefined
     const logoffNode = host.flow.nodes.find((node) => node.id === 'logoff')
     const failedTerminalKind = !passed && pendingThreat.terminalOnFail ? terminalKindForThreat(pendingThreat.type) : undefined
 
     setCrawl((current) => {
       const remainingThreats = (current.pendingThreats ?? []).slice(1)
+      const deferredSuppressedThreat = action === 'suppress' && passed && suppressionThreshold ? [deferredThreatForSuppression(pendingThreat, suppressionThreshold)] : []
       const activatedThreat = passed || failedTerminalKind || (action === 'jackout' && !passed) ? [] : [{ ...pendingThreat, status: 'active' as const }]
       const emergencyJackOut = passed && action === 'jackout'
       const failedJackout = !passed && action === 'jackout'
@@ -847,6 +931,7 @@ function App() {
         revealedNodeIds: emergencyJackOut && logoffNode ? unique([...(current.revealedNodeIds ?? current.visitedNodeIds), logoffNode.id]) : current.revealedNodeIds,
         pendingThreats: remainingThreats,
         activeThreats: [...(current.activeThreats ?? []), ...activatedThreat],
+        deferredThreats: [...(current.deferredThreats ?? []), ...deferredSuppressedThreat],
         runEnd,
         securityTally: after,
         path: [entry, ...current.path].slice(0, 60),
@@ -859,26 +944,38 @@ function App() {
       title: passed ? `${verb} succeeded` : `${pendingThreat.label} is active`,
       detail: `${successes}/${requiredSuccesses} successes vs TN ${targetNumber}`,
     })
-    setMessage(passed ? `${pendingThreat.label} handled.` : `${pendingThreat.label} remains active and will add pressure to future tests.`)
+    setMessage(passed ? (action === 'suppress' && suppressionThreshold ? `${pendingThreat.label} suppressed/evaded. It will return at Security Tally ${suppressionThreshold}.` : `${pendingThreat.label} handled.`) : `${pendingThreat.label} remains active and will add pressure to future tests.`)
   }
 
   function suppressThreatWithPool() {
     if (!pendingThreat) return
+    if (!canSuppressThreat(pendingThreat)) {
+      setMessage(suppressionBlockedText(pendingThreat))
+      return
+    }
     if (effectiveHackingPool < 1) {
       setMessage('No free Hacking Pool dice are available to suppress this IC.')
       return
     }
+    const suppressionThreshold = nextBlankSuppressionThreshold(host, crawl, pendingThreat, shutdownTally)
+    if (!suppressionThreshold) {
+      setMessage('No blank higher Security Tally slot exists before shutdown. Fight the IC, ignore it, or jack out.')
+      return
+    }
     const dice = 1
-    const entry = threatEntry(pendingThreat, 'Pool Suppression', `${pendingThreat.label} suppressed with 1 Hacking Pool die`)
-    const poolLock: PoolLock = { id: `pool-lock-${pendingThreat.id}-${Date.now()}`, label: pendingThreat.label, dice, reason: 'IC suppression' }
+    const entry = threatEntry(pendingThreat, 'Pool Suppression', `${pendingThreat.label} suppressed with 1 Hacking Pool die until Tally ${suppressionThreshold}`)
+    const originalThreatId = sourceThreatId(pendingThreat)
+    const poolLock: PoolLock = { id: `pool-lock-${pendingThreat.id}-${Date.now()}`, sourceThreatId: originalThreatId, label: pendingThreat.label, dice, reason: 'IC suppression' }
+    const deferredThreat = deferredThreatForSuppression(pendingThreat, suppressionThreshold)
     setCrawl((current) => ({
       ...current,
       pendingThreats: (current.pendingThreats ?? []).slice(1),
+      deferredThreats: [...(current.deferredThreats ?? []), deferredThreat],
       poolLocks: [...(current.poolLocks ?? []), poolLock],
       path: [entry, ...current.path].slice(0, 60),
     }))
-    setRollFeedback({ id: Date.now(), tone: 'success', icon: '🔒', title: `${pendingThreat.label} suppressed`, detail: '1 Hacking Pool die tied up until the run resets/ends.' })
-    setMessage(`${pendingThreat.label} suppressed by tying up 1 Hacking Pool die. Future rolls use a smaller effective pool.`)
+    setRollFeedback({ id: Date.now(), tone: 'success', icon: '🔒', title: `${pendingThreat.label} suppressed`, detail: `1 Hacking Pool die tied up until the IC returns at Tally ${suppressionThreshold}.` })
+    setMessage(`${pendingThreat.label} suppressed by tying up 1 Hacking Pool die. It will return at Security Tally ${suppressionThreshold}; the die frees when it returns.`)
   }
 
   function ignoreThreatCheckpoint() {
@@ -955,12 +1052,13 @@ function App() {
         <article><span>Deck</span><strong>{deck.sourceName}</strong><small>{deck.handle} · DF {effectiveDetectionFactor}{dfPoolReserve > 0 ? ` (${deck.detectionFactor}+${effectiveDetectionFactor - deck.detectionFactor})` : ''} · Pool {effectiveHackingPool}/{hackingPoolAvailable} free, {totalCommittedPool} committed</small></article>
         <article><span>Matrix host</span><strong>{host.name}</strong><small>{host.securityCode.toUpperCase()}-{host.securityValue}</small></article>
         <article><span>Tally</span><strong>{crawl.securityTally}/{shutdownTally}</strong><small>{runEnd ? 'Run over' : pendingThreat ? `Checkpoint: ${pendingThreat.label}` : nextSheaf ? `Next: ${nextSheaf.threshold} ${nextSheaf.label}` : 'End / GM escalation'}</small></article>
-        <article><span>Location</span><strong>{runEnd ? runEnd.title : currentNode.title}</strong><small>{activeThreats.length ? `${activeThreats.length} active threat(s)` : currentNode.kind}</small></article>
+        <article><span>Location</span><strong>{runEnd ? runEnd.title : currentNode.title}</strong><small>{activeThreats.length ? `${activeThreats.length} active threat(s)` : deferredThreats.length ? `${deferredThreats.length} suppressed IC queued` : currentNode.kind}</small></article>
       </section>
 
       {alertState !== 'normal' && !runEnd && <section className={`alert-state ${alertState}`}><span className="alert-light" /><article><strong>{alertLabel(alertState)}</strong><small>{alertState === 'passive' ? `Security Tally has reached at least one-third of shutdown (${passiveAlertAt}/${shutdownTally}). The host is suspicious.` : alertState === 'active' ? `Security Tally has reached at least two-thirds of shutdown (${activeAlertAt}/${shutdownTally}). The host is actively responding.` : `Security Tally has reached shutdown (${shutdownTally}).`}</small></article></section>}
       {activeThreats.length > 0 && <section className="active-threats"><span>Active pressure</span>{activeThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Rating {threat.rating} · {descriptionForThreat(threat.type)}</small></article>)}</section>}
-      {(dfPoolReserve > 0 || poolLocks.length > 0) && <section className="pool-allocations"><span>Pool allocations</span>{dfPoolReserve > 0 && <article><strong>Detection Factor reserve</strong><small>{dfPoolReserve} Hacking Pool dice reserved · effective DF {effectiveDetectionFactor}</small></article>}{poolLocks.map((lock) => <article key={lock.id}><strong>{lock.reason}: {lock.label}</strong><small>{lock.dice} Hacking Pool die/dice tied up until reset/end</small></article>)}</section>}
+      {deferredThreats.length > 0 && <section className="deferred-threats"><span>Suppressed IC queued</span>{deferredThreats.map((threat) => <article key={threat.id}><strong>{threat.label}</strong><small>Returns at Tally {threat.threshold} · {icClassForThreat(threat.type).toUpperCase()} IC</small></article>)}</section>}
+      {(dfPoolReserve > 0 || poolLocks.length > 0) && <section className="pool-allocations"><span>Pool allocations</span>{dfPoolReserve > 0 && <article><strong>Detection Factor reserve</strong><small>{dfPoolReserve} Hacking Pool dice reserved · effective DF {effectiveDetectionFactor}</small></article>}{poolLocks.map((lock) => <article key={lock.id}><strong>{lock.reason}: {lock.label}</strong><small>{lock.dice} Hacking Pool die/dice tied up until {lock.sourceThreatId ? 'the IC returns' : 'reset/end'}</small></article>)}</section>}
 
       <section className="crawl-layout">
         <aside className="node-map">
@@ -998,7 +1096,7 @@ function App() {
             <h3>{pendingThreat.label}</h3>
             <p>{pendingThreat.effect}</p>
             <div className="ic-context">
-              <strong>{pendingThreat.type} IC / security behavior</strong>
+              <strong>{icClassForThreat(pendingThreat.type).toUpperCase()} {pendingThreat.type} IC / security behavior</strong>
               <span>{descriptionForThreat(pendingThreat.type)}</span>
               <small>{pendingThreat.consequence}</small>
             </div>
@@ -1010,8 +1108,8 @@ function App() {
             </div>
             <p className="roll-formula">Effective roll pool: Computer {computerSkill} + free Hacking Pool {effectiveHackingPool} = {computerSkill + effectiveHackingPool} dice. {lockedPoolDice} pool dice tied up suppressing IC; {dfPoolReserve} reserved for Detection Factor.</p>
             <div className="threat-actions">
-              <button onClick={() => rollThreatCheckpoint('suppress')}><strong>Suppress / Evade</strong><span>{pendingThreatActionDetails?.suppress}</span></button>
-              <button onClick={suppressThreatWithPool} disabled={effectiveHackingPool < 1}><strong>Suppress with Pool</strong><span>Tie up 1 free Hacking Pool die. Clears this checkpoint without a roll until reset/end.</span></button>
+              <button onClick={() => rollThreatCheckpoint('suppress')} disabled={!pendingThreatCanSuppress}><strong>Suppress / Evade</strong><span>{pendingThreatActionDetails?.suppress}</span></button>
+              <button onClick={suppressThreatWithPool} disabled={effectiveHackingPool < 1 || !pendingThreatCanSuppress}><strong>Suppress with Pool</strong><span>{pendingThreatCanSuppress ? 'Tie up 1 free Hacking Pool die. WHITE IC returns at a blank higher Tally slot; the die frees when it returns.' : pendingThreatActionDetails?.suppress}</span></button>
               <button onClick={() => rollThreatCheckpoint('fight')}><strong>Fight IC</strong><span>{pendingThreatActionDetails?.fight}</span></button>
               <button onClick={ignoreThreatCheckpoint}><strong>Ignore and Continue</strong><span>{pendingThreatActionDetails?.ignore}</span></button>
               <button onClick={() => rollThreatCheckpoint('jackout')}><strong>Jack Out</strong><span>{pendingThreatActionDetails?.jackout}</span></button>
