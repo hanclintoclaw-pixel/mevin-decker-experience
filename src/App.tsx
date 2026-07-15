@@ -806,11 +806,11 @@ const PAYDATA_QUALITY: Record<PaydataQuality, { label: string; multiplier: numbe
   hot: { label: 'Radioactive / hot', multiplier: 0.85, heat: 'Hot data; value remains high, but buyer scrutiny and source-safety risk rise.' },
 }
 
-const PAYDATA_SALE_MODES: Record<PaydataSaleMode, { label: string; basePercent: number; perSuccess: number; maxPercent: number; rollTarget: number; close: 'immediate' | 'listing' | 'auction' | 'quarantine' }> = {
-  quickBuyout: { label: 'Quick Buyout', basePercent: 0.4, perSuccess: 0.05, maxPercent: 0.65, rollTarget: 4, close: 'immediate' },
-  havenListing: { label: 'Haven Listing', basePercent: 0.55, perSuccess: 0.07, maxPercent: 0.9, rollTarget: 5, close: 'listing' },
-  blindAuction: { label: 'Blind Auction', basePercent: 0.35, perSuccess: 0.15, maxPercent: 1.5, rollTarget: 6, close: 'auction' },
-  quarantine: { label: 'Quarantine / Refusal', basePercent: 0, perSuccess: 0, maxPercent: 0, rollTarget: 0, close: 'quarantine' },
+const PAYDATA_SALE_MODES: Record<PaydataSaleMode, { label: string; description: string; basePercent: number; perSuccess: number; maxPercent: number; rollTarget: number; close: 'immediate' | 'listing' | 'auction' | 'quarantine' }> = {
+  quickBuyout: { label: 'Quick Buyout', description: 'Immediate cash from Ruby Falls or a trusted standing buyer. Lowest overhead, lowest upside.', basePercent: 0.4, perSuccess: 0.05, maxPercent: 0.65, rollTarget: 4, close: 'immediate' },
+  havenListing: { label: 'Haven Listing', description: 'Protected listing to a vetted buyer pool. Safer default, better expected payout, usually a short delay.', basePercent: 0.55, perSuccess: 0.07, maxPercent: 0.9, rollTarget: 5, close: 'listing' },
+  blindAuction: { label: 'Blind Auction', description: 'Anonymous auction for spicy or high-interest data. Highest upside, more delay, more hook potential.', basePercent: 0.35, perSuccess: 0.15, maxPercent: 1.5, rollTarget: 6, close: 'auction' },
+  quarantine: { label: 'Quarantine / Refusal', description: 'No payout yet. Sister Anode holds or refuses unsafe data pending source-safety review.', basePercent: 0, perSuccess: 0, maxPercent: 0, rollTarget: 0, close: 'quarantine' },
 }
 
 function freshnessMultiplier(ageDays: number) {
@@ -1520,6 +1520,7 @@ function App() {
               </select></label>
             </div>
             <label>Tags / context<input value={paydataTags} onChange={(event) => setPaydataTags(event.target.value)} placeholder="corp, civic, blackmail, logistics, zero-day, public-interest..." /></label>
+            <p className="paydata-mode-note"><strong>{PAYDATA_SALE_MODES[paydataSaleMode].label}:</strong> {PAYDATA_SALE_MODES[paydataSaleMode].description}</p>
             <div className="paydata-math-grid">
               <article><span>Base</span><strong>{nuyen(Math.max(0, paydataPoints) * 5000)}</strong><small>5,000¥ per point</small></article>
               <article><span>Freshness</span><strong>{Math.round(freshnessMultiplier(Math.max(0, paydataAgeDays)) * 100)}%</strong><small>age {Math.max(0, paydataAgeDays)} day(s)</small></article>
