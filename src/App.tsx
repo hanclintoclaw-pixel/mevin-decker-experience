@@ -46,6 +46,13 @@ interface RunAdvantageDefinition {
   appliesTo?: string[]
 }
 
+interface PaydataBrokerTool {
+  type: 'paydataBroker'
+  havenName: string
+  brokerName: string
+  reportPrefix: string
+}
+
 interface FlowNode {
   id: string
   title: string
@@ -53,11 +60,14 @@ interface FlowNode {
   description: string
   choices: FlowChoice[]
   advantages?: RunAdvantageDefinition[]
+  tool?: PaydataBrokerTool
 }
 
 type ThreatType = 'probe' | 'trace' | 'scramble' | 'tarBaby' | 'killer' | 'blaster' | 'sparky' | 'black' | 'psychotropic' | 'generic'
 type RunEndKind = 'gracefulLogoff' | 'emergencyJackOut' | 'iconCrashed' | 'traceCompleted' | 'blackIcHarm' | 'psychotropicHarm' | 'objectiveComplete' | 'shutdownDumpshock' | 'failedJackoutDumpshock'
 type AlertState = 'normal' | 'passive' | 'active' | 'shutdown'
+type PaydataQuality = 'clean' | 'partial' | 'messy' | 'hot'
+type PaydataSaleMode = 'quickBuyout' | 'havenListing' | 'blindAuction' | 'quarantine'
 
 interface SecuritySheafStep {
   threshold: number
@@ -789,6 +799,102 @@ function runEndForThreat(threat: ThreatCheckpoint, kind: RunEndKind): RunEndStat
   }
 }
 
+const PAYDATA_QUALITY: Record<PaydataQuality, { label: string; multiplier: number; heat: string }> = {
+  clean: { label: 'Clean', multiplier: 1, heat: 'Clean handling; no extra heat by default.' },
+  partial: { label: 'Partial', multiplier: 0.65, heat: 'Partial data; buyers discount heavily and may ask for corroboration.' },
+  messy: { label: 'Messy', multiplier: 0.45, heat: 'Messy data; Ruby Falls may redact, delay, or narrow the buyer pool.' },
+  hot: { label: 'Radioactive / hot', multiplier: 0.85, heat: 'Hot data; value remains high, but buyer scrutiny and source-safety risk rise.' },
+}
+
+const PAYDATA_SALE_MODES: Record<PaydataSaleMode, { label: string; basePercent: number; perSuccess: number; maxPercent: number; rollTarget: number; close: 'immediate' | 'listing' | 'auction' | 'quarantine' }> = {
+  quickBuyout: { label: 'Quick Buyout', basePercent: 0.4, perSuccess: 0.05, maxPercent: 0.65, rollTarget: 4, close: 'immediate' },
+  havenListing: { label: 'Haven Listing', basePercent: 0.55, perSuccess: 0.07, maxPercent: 0.9, rollTarget: 5, close: 'listing' },
+  blindAuction: { label: 'Blind Auction', basePercent: 0.35, perSuccess: 0.15, maxPercent: 1.5, rollTarget: 6, close: 'auction' },
+  quarantine: { label: 'Quarantine / Refusal', basePercent: 0, perSuccess: 0, maxPercent: 0, rollTarget: 0, close: 'quarantine' },
+}
+
+function freshnessMultiplier(ageDays: number) {
+  if (ageDays <= 0) return 1
+  if (ageDays === 1) return 0.9
+  if (ageDays === 2) return 0.75
+  if (ageDays === 3) return 0.55
+  if (ageDays === 4) return 0.35
+  return 0.2
+}
+
+function nuyen(value: number) {
+  return `${Math.round(value).toLocaleString()}¥`
+}
+
+function saleCloseText(mode: PaydataSaleMode, dice: number[]) {
+  if (mode === 'quickBuyout') return 'Immediate'
+  if (mode === 'havenListing') return `${Math.max(1, Math.ceil((dice[0] ?? 1) / 2))} day(s)`
+  if (mode === 'blindAuction') return `${dice[0] ?? 1} day(s)`
+  return 'Pending GM/source-safety review'
+}
+
+function heatText(mode: PaydataSaleMode, quality: PaydataQuality, heatRoll: number, tags: string) {
+  if (mode === 'quarantine') return 'Sister Anode refuses immediate sale until source-safety review clears it.'
+  const tagText = tags.trim() ? ` Tags noted: ${tags.trim()}.` : ''
+  const qualityHeat = PAYDATA_QUALITY[quality].heat
+  if (heatRoll <= 3) return `${qualityHeat} Heat roll is quiet; no immediate complication.${tagText}`
+  if (heatRoll <= 8) return `${qualityHeat} Heat roll is ordinary; sale proceeds with normal Ruby Falls caution.${tagText}`
+  if (heatRoll <= 10) return `${qualityHeat} Heat roll is spicy; buyer verification, redaction, or a delay may become a small hook.${tagText}`
+  return `${qualityHeat} Heat roll is loud; the GM should consider buyer weirdness, corp interest, or a source-safety complication.${tagText}`
+}
+
+interface PaydataBrokerResult {
+  baseValue: number
+  adjustedValue: number
+  payoutPercent: number
+  finalPayout: number
+  saleDice: number[]
+  saleSuccesses: number
+  heatDice: number[]
+  closeText: string
+  heatNote: string
+  report: string
+}
+
+function buildPaydataBrokerResult(params: {
+  tool: PaydataBrokerTool
+  points: number
+  ageDays: number
+  quality: PaydataQuality
+  mode: PaydataSaleMode
+  tags: string
+  saleDice: number[]
+  heatDice: number[]
+}): PaydataBrokerResult {
+  const mode = PAYDATA_SALE_MODES[params.mode]
+  const quality = PAYDATA_QUALITY[params.quality]
+  const baseValue = Math.max(0, params.points) * 5000
+  const adjustedValue = baseValue * freshnessMultiplier(Math.max(0, params.ageDays)) * quality.multiplier
+  const saleSuccesses = params.mode === 'quarantine' ? 0 : params.saleDice.filter((die) => die >= mode.rollTarget).length
+  const payoutPercent = Math.min(mode.maxPercent, mode.basePercent + mode.perSuccess * saleSuccesses)
+  const finalPayout = params.mode === 'quarantine' ? 0 : adjustedValue * payoutPercent
+  const closeText = saleCloseText(params.mode, params.saleDice)
+  const heatRoll = params.heatDice.reduce((sum, die) => sum + die, 0)
+  const heatNote = heatText(params.mode, params.quality, heatRoll, params.tags)
+  const report = [
+    `${params.tool.reportPrefix} PAYDATA SALE`,
+    'Seller: Mevin',
+    `Broker: ${params.tool.brokerName} / ${params.tool.havenName}`,
+    `Mode: ${mode.label}`,
+    `Paydata Points: ${Math.max(0, params.points)}`,
+    `Age: ${Math.max(0, params.ageDays)} day(s)`,
+    `Tags/quality: ${params.tags.trim() || 'none'} / ${quality.label}`,
+    `Base value: ${nuyen(baseValue)}`,
+    `Freshness/quality adjusted value: ${nuyen(adjustedValue)}`,
+    `Sale roll: ${params.mode === 'quarantine' ? 'none (quarantine)' : `${params.saleDice.join(', ')} vs TN ${mode.rollTarget}; ${saleSuccesses} success(es); payout ${Math.round(payoutPercent * 100)}%`}`,
+    `Close time: ${closeText}`,
+    `Final payout / Nuyen delta: +${nuyen(finalPayout)}`,
+    `Heat/status note: ${heatNote}`,
+    `Cindy ingest note: ${finalPayout > 0 ? 'update Mevin\'s nuyen total by the final payout when the sale resolves' : 'do not update Mevin\'s nuyen yet'} and record this as a Ruby Falls paydata sale.`,
+  ].join('\n')
+  return { baseValue, adjustedValue, payoutPercent, finalPayout, saleDice: params.saleDice, saleSuccesses, heatDice: params.heatDice, closeText, heatNote, report }
+}
+
 function buildRunReport(host: HostProfile, deck: DeckRuntime, crawl: CrawlState, runEnd: RunEndState, outcomes: RunOutcome[], activeThreats: ThreatCheckpoint[], poolLocks: PoolLock[], advantages: RunAdvantage[], dfPoolReserve: number) {
   const dfBonus = dfBonusFromReserve(dfPoolReserve)
   const shutdownTally = shutdownTallyForHost(host)
@@ -837,10 +943,17 @@ function App() {
   const [manualTargetNumberModifier, setManualTargetNumberModifier] = useState(-1)
   const [manualRequiredSuccessModifier, setManualRequiredSuccessModifier] = useState(0)
   const [manualAppliesTo, setManualAppliesTo] = useState('')
+  const [paydataPoints, setPaydataPoints] = useState(1)
+  const [paydataAgeDays, setPaydataAgeDays] = useState(0)
+  const [paydataQuality, setPaydataQuality] = useState<PaydataQuality>('clean')
+  const [paydataSaleMode, setPaydataSaleMode] = useState<PaydataSaleMode>('havenListing')
+  const [paydataTags, setPaydataTags] = useState('')
+  const [paydataResult, setPaydataResult] = useState<PaydataBrokerResult | undefined>()
   const hostNodeById = useMemo(() => new Map(host.flow.nodes.map((node) => [node.id, node])), [host])
   const hostMap = useMemo(() => buildHostMapLayout(host), [host])
   const currentNode = useMemo(() => hostNodeById.get(crawl.currentNodeId) ?? host.flow.nodes[0], [host, hostNodeById, crawl.currentNodeId])
   const currentChoices = useMemo(() => frontDoorChoices(currentNode, host), [currentNode, host])
+  const paydataTool = currentNode.tool?.type === 'paydataBroker' ? currentNode.tool : undefined
   const revealedNodeIds = crawl.revealedNodeIds ?? crawl.visitedNodeIds
   const choiceGates = crawl.choiceGates ?? EMPTY_CHOICE_GATES
   const pendingThreat = crawl.pendingThreats?.[0]
@@ -1284,6 +1397,34 @@ function App() {
     })
   }
 
+  function rollPaydataBroker() {
+    if (!paydataTool) return
+    const mode = PAYDATA_SALE_MODES[paydataSaleMode]
+    const saleDice = paydataSaleMode === 'quarantine' ? [] : Array.from({ length: 6 }, () => rollOpenD6(mode.rollTarget))
+    const heatDice = paydataSaleMode === 'quarantine' ? [] : [rollOpenD6(4), rollOpenD6(4)]
+    const result = buildPaydataBrokerResult({
+      tool: paydataTool,
+      points: Math.max(0, paydataPoints),
+      ageDays: Math.max(0, paydataAgeDays),
+      quality: paydataQuality,
+      mode: paydataSaleMode,
+      tags: paydataTags,
+      saleDice,
+      heatDice,
+    })
+    setPaydataResult(result)
+    setMessage(`Paydata broker result: +${nuyen(result.finalPayout)} via ${PAYDATA_SALE_MODES[paydataSaleMode].label}.`)
+  }
+
+  function copyPaydataReport() {
+    if (!paydataResult) return
+    void navigator.clipboard.writeText(paydataResult.report).then(() => {
+      setMessage('Paydata sale report copied for Cindy / GM handoff.')
+    }).catch(() => {
+      setMessage('Copy failed; select the paydata report text manually.')
+    })
+  }
+
   function resetCrawl() {
     setCrawl(freshCrawl(host))
     setSelectedChoiceIndex(0)
@@ -1362,6 +1503,46 @@ function App() {
           <p className="kicker">Current node</p>
           <h2>{currentNode.title}</h2>
           <p>{currentNode.description}</p>
+          {paydataTool && <section className="paydata-broker-panel">
+            <div>
+              <p className="kicker">Reusable tool</p>
+              <h3>{paydataTool.havenName} Paydata Broker</h3>
+              <p>Enter recovered Paydata Points, age, quality, and sale mode. The panel handles freshness decay, quality adjustment, sale roll, payout, close time, and Cindy-ready nuyen update report.</p>
+            </div>
+            <div className="paydata-form-grid">
+              <label>Paydata Points<input type="number" min="0" value={paydataPoints} onChange={(event) => setPaydataPoints(Number(event.target.value))} /></label>
+              <label>Age in days<input type="number" min="0" value={paydataAgeDays} onChange={(event) => setPaydataAgeDays(Number(event.target.value))} /></label>
+              <label>Quality<select value={paydataQuality} onChange={(event) => setPaydataQuality(event.target.value as PaydataQuality)}>
+                {(Object.keys(PAYDATA_QUALITY) as PaydataQuality[]).map((quality) => <option key={quality} value={quality}>{PAYDATA_QUALITY[quality].label}</option>)}
+              </select></label>
+              <label>Sale mode<select value={paydataSaleMode} onChange={(event) => setPaydataSaleMode(event.target.value as PaydataSaleMode)}>
+                {(Object.keys(PAYDATA_SALE_MODES) as PaydataSaleMode[]).map((mode) => <option key={mode} value={mode}>{PAYDATA_SALE_MODES[mode].label}</option>)}
+              </select></label>
+            </div>
+            <label>Tags / context<input value={paydataTags} onChange={(event) => setPaydataTags(event.target.value)} placeholder="corp, civic, blackmail, logistics, zero-day, public-interest..." /></label>
+            <div className="paydata-math-grid">
+              <article><span>Base</span><strong>{nuyen(Math.max(0, paydataPoints) * 5000)}</strong><small>5,000¥ per point</small></article>
+              <article><span>Freshness</span><strong>{Math.round(freshnessMultiplier(Math.max(0, paydataAgeDays)) * 100)}%</strong><small>age {Math.max(0, paydataAgeDays)} day(s)</small></article>
+              <article><span>Quality</span><strong>{Math.round(PAYDATA_QUALITY[paydataQuality].multiplier * 100)}%</strong><small>{PAYDATA_QUALITY[paydataQuality].label}</small></article>
+              <article><span>Mode</span><strong>{PAYDATA_SALE_MODES[paydataSaleMode].label}</strong><small>{paydataSaleMode === 'quarantine' ? '+0¥ pending review' : `roll 6 dice vs TN ${PAYDATA_SALE_MODES[paydataSaleMode].rollTarget}`}</small></article>
+            </div>
+            <button className="roll-button" onClick={rollPaydataBroker}>Roll broker sale</button>
+            {paydataResult && <div className="paydata-result-box">
+              <div className="run-summary-grid">
+                <article><span>Adjusted value</span><strong>{nuyen(paydataResult.adjustedValue)}</strong></article>
+                <article><span>Payout</span><strong>+{nuyen(paydataResult.finalPayout)}</strong></article>
+                <article><span>Close</span><strong>{paydataResult.closeText}</strong></article>
+              </div>
+              <p>{paydataResult.saleDice.length ? `Sale roll: ${paydataResult.saleDice.join(', ')} for ${paydataResult.saleSuccesses} success(es); payout ${Math.round(paydataResult.payoutPercent * 100)}%.` : 'Sale roll skipped: quarantine / refusal mode.'}</p>
+              <p>{paydataResult.heatNote}</p>
+              <label htmlFor="paydata-report">Discord-ready paydata sale report</label>
+              <textarea id="paydata-report" readOnly value={paydataResult.report} rows={Math.min(16, Math.max(10, paydataResult.report.split('\n').length))} />
+              <div className="run-report-actions">
+                <button onClick={copyPaydataReport}>Copy paydata report</button>
+                <button onClick={rollPaydataBroker}>Reroll sale</button>
+              </div>
+            </div>}
+          </section>}
           {alertState !== 'normal' && !runEnd && <div className={`node-alert ${alertState}`}><span className="alert-light" /><article><strong>{alertLabel(alertState)}</strong><small>{alertState === 'passive' ? `Security Tally has reached at least one-third of shutdown (${passiveAlertAt}/${shutdownTally}). The host is suspicious.` : alertState === 'active' ? `Security Tally has reached at least two-thirds of shutdown (${activeAlertAt}/${shutdownTally}). The host is actively responding.` : `Security Tally has reached shutdown (${shutdownTally}).`}</small></article></div>}
           {rollFeedback && <div key={rollFeedback.id} className={`roll-feedback ${rollFeedback.tone}`}><strong>{rollFeedback.icon} {rollFeedback.title}</strong><span>{rollFeedback.detail}</span></div>}
           {runEnd ? <div className="run-end-card">

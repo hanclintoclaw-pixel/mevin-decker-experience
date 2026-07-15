@@ -18,6 +18,7 @@ body {
 a { color: #7ee7ff; }
 button,
 input,
+select,
 .file-button { font: inherit; }
 button,
 .file-button {
@@ -34,6 +35,7 @@ button.selected { border-color: #d28cff; box-shadow: 0 0 28px rgba(210, 140, 255
 button.selected { background: rgba(210, 140, 255, 0.18); }
 button:disabled { cursor: not-allowed; }
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid rgba(126, 231, 255, 0.32);
@@ -245,6 +247,31 @@ h2 { margin: 0 0 0.8rem; }
 }
 .run-report-box textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.86rem; margin-top: 0.45rem; }
 .run-report-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.75rem; }
+
+.paydata-broker-panel {
+  border: 1px solid rgba(255, 189, 89, 0.38);
+  background:
+    radial-gradient(circle at 10% 0%, rgba(255, 189, 89, 0.14), transparent 18rem),
+    rgba(45, 27, 8, 0.42);
+  border-radius: 22px;
+  padding: 1rem;
+  margin: 1rem 0;
+  display: grid;
+  gap: 0.85rem;
+}
+.paydata-broker-panel h3 { margin: 0; font-size: clamp(1.45rem, 3vw, 2.3rem); }
+.paydata-broker-panel p { margin: 0; font-size: 0.98rem; }
+.paydata-form-grid, .paydata-math-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
+.paydata-math-grid article {
+  border: 1px solid rgba(255, 189, 89, 0.24);
+  background: rgba(8, 5, 20, 0.34);
+  border-radius: 16px;
+  padding: 0.8rem;
+}
+.paydata-math-grid span { color: #ffbd59; text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
+.paydata-math-grid strong { display: block; margin: 0.2rem 0; }
+.paydata-result-box { border-top: 1px solid rgba(255, 189, 89, 0.28); padding-top: 0.85rem; display: grid; gap: 0.75rem; }
+.paydata-result-box textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.86rem; }
 
 .threat-checkpoint {
   border: 2px solid rgba(255, 111, 166, 0.56);
