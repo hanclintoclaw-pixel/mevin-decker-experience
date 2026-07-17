@@ -53,6 +53,15 @@ interface PaydataBrokerTool {
   reportPrefix: string
 }
 
+type ReportInclude = 'auto' | 'always' | 'never'
+
+interface NodeReport {
+  title?: string
+  detail?: string
+  notifyGm?: boolean
+  include?: ReportInclude
+}
+
 interface FlowNode {
   id: string
   title: string
@@ -60,6 +69,7 @@ interface FlowNode {
   description: string
   choices: FlowChoice[]
   advantages?: RunAdvantageDefinition[]
+  report?: NodeReport
   tool?: PaydataBrokerTool
 }
 
@@ -226,6 +236,11 @@ interface HostMapLayout {
   nodes: HostMapNode[]
   edges: HostMapEdge[]
   heightRem: number
+}
+
+interface HostDesignIssue {
+  severity: 'warning' | 'info'
+  message: string
 }
 
 const EMPTY_CHOICE_GATES: Record<string, ChoiceGateState> = {}
@@ -398,6 +413,10 @@ function choiceKey(nodeId: string, choiceIndex: number) {
 
 function isGracefulLogoffChoice(choice?: FlowChoice) {
   return choice?.to === GRACEFUL_LOGOFF_NODE_ID
+}
+
+function isBackoutChoice(choice: FlowChoice) {
+  return isGracefulLogoffChoice(choice) || /\b(back|return|retreat|exit|log\s*off|logoff)\b/i.test(choice.label)
 }
 
 function hasFrontDoorLogoff(host: HostProfile) {
@@ -654,6 +673,22 @@ function consequenceForThreat(type: ThreatType, label: string) {
   return consequences[type]
 }
 
+const REPORTABLE_NODE_KINDS = new Set(['confirmation', 'reward', 'gm-reward', 'paydata', 'permanent-outcome', 'major-reward', 'access-reward', 'device-access', 'file-access'])
+const NON_REPORTABLE_NODE_KINDS = new Set(['entry', 'setup', 'public', 'lobby', 'menu', 'private', 'hub', 'navigation', 'tool', 'exit'])
+const CONCRETE_REPORT_PATTERN = /\b(access|archive|badge|cache|camera|control|customer|data|door|elevator|file|log|mail|manifest|paydata|personnel|record|schedule|shipping|supplier|vendor)\b/i
+
+function shouldReportNode(node: FlowNode) {
+  if (node.report?.include === 'never') return false
+  if (node.report?.include === 'always') return true
+  if (REPORTABLE_NODE_KINDS.has(node.kind)) return true
+  if (NON_REPORTABLE_NODE_KINDS.has(node.kind)) return false
+  return CONCRETE_REPORT_PATTERN.test(`${node.kind} ${node.title} ${node.description}`)
+}
+
+function defaultNotifyGmForNode(node: FlowNode) {
+  return node.kind === 'gm-reward' || node.kind === 'permanent-outcome' || node.kind === 'major-reward' || node.kind === 'paydata'
+}
+
 function terminalKindForThreat(type: ThreatType): RunEndKind | undefined {
   if (type === 'trace') return 'traceCompleted'
   if (type === 'black') return 'blackIcHarm'
@@ -663,13 +698,43 @@ function terminalKindForThreat(type: ThreatType): RunEndKind | undefined {
 }
 
 function outcomeForNode(node: FlowNode): RunOutcome | undefined {
-  if (!['reward', 'gm-reward', 'paydata', 'permanent-outcome', 'major-reward'].includes(node.kind)) return undefined
+  if (!shouldReportNode(node)) return undefined
   return {
     id: node.id,
-    title: node.title,
-    detail: node.description,
-    notifyGm: node.kind === 'gm-reward' || node.kind === 'permanent-outcome' || node.kind === 'major-reward' || node.kind === 'paydata',
+    title: node.report?.title ?? node.title,
+    detail: node.report?.detail ?? node.description,
+    notifyGm: node.report?.notifyGm ?? defaultNotifyGmForNode(node),
   }
+}
+
+function designIssuesForHost(host: HostProfile): HostDesignIssue[] {
+  const nodeById = new Map(host.flow.nodes.map((node) => [node.id, node]))
+  const issues: HostDesignIssue[] = []
+
+  for (const node of host.flow.nodes) {
+    for (const choice of node.choices) {
+      const destinationNode = nodeById.get(choice.to)
+      if (!destinationNode || isBackoutChoice(choice)) continue
+
+      const substantiveChoices = destinationNode.choices.filter((nextChoice) => !isBackoutChoice(nextChoice))
+      if (choice.testId && substantiveChoices.length === 1 && substantiveChoices[0].testId) {
+        issues.push({
+          severity: 'warning',
+          message: `Double gate risk: "${node.title}" -> "${destinationNode.title}" unlocks only one substantive onward action, and that action also requires a roll. Merge the gates or make the first success reveal a usable location, result, hub, or back-out choice.`,
+        })
+      }
+
+      const looksConcrete = CONCRETE_REPORT_PATTERN.test(`${destinationNode.kind} ${destinationNode.title} ${destinationNode.description}`)
+      if (choice.testId && looksConcrete && !shouldReportNode(destinationNode)) {
+        issues.push({
+          severity: 'info',
+          message: `Report coverage: successful "${choice.label}" reaches "${destinationNode.title}", which looks concrete but will not appear in the final run report. Add report.include="always" or use a reportable kind such as confirmation/reward.`,
+        })
+      }
+    }
+  }
+
+  return issues
 }
 
 function shutdownTallyForHost(host: HostProfile) {
@@ -951,6 +1016,7 @@ function App() {
   const [paydataResult, setPaydataResult] = useState<PaydataBrokerResult | undefined>()
   const hostNodeById = useMemo(() => new Map(host.flow.nodes.map((node) => [node.id, node])), [host])
   const hostMap = useMemo(() => buildHostMapLayout(host), [host])
+  const hostDesignIssues = useMemo(() => designIssuesForHost(host), [host])
   const currentNode = useMemo(() => hostNodeById.get(crawl.currentNodeId) ?? host.flow.nodes[0], [host, hostNodeById, crawl.currentNodeId])
   const currentChoices = useMemo(() => frontDoorChoices(currentNode, host), [currentNode, host])
   const paydataTool = currentNode.tool?.type === 'paydataBroker' ? currentNode.tool : undefined
@@ -1468,6 +1534,8 @@ function App() {
           <label className="file-button">Import Scenario JSON<input type="file" accept="application/json,.json" onChange={(event) => void importHost(event)} /></label>
         </div>
       </section>
+
+      {hostDesignIssues.length > 0 && <section className="design-issues"><span>Host design checks</span>{hostDesignIssues.map((issue, index) => <article key={`${issue.severity}-${index}`} className={issue.severity}><strong>{issue.severity === 'warning' ? 'Fix recommended' : 'Check report output'}</strong><small>{issue.message}</small></article>)}</section>}
 
       <section className="status-grid">
         <article><span>Deck</span><strong>{deck.sourceName}</strong><small>{deck.handle} · DF {effectiveDetectionFactor}{dfPoolReserve > 0 ? ` (${deck.detectionFactor}+${effectiveDetectionFactor - deck.detectionFactor})` : ''} · Pool {effectiveHackingPool}/{hackingPoolAvailable} free, {totalCommittedPool} committed</small></article>

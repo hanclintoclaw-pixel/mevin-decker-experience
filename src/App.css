@@ -97,6 +97,7 @@ h2 { margin: 0 0 0.8rem; }
 .active-threats,
 .deferred-threats,
 .pool-allocations,
+.design-issues,
 .gm-panel {
   display: grid;
   grid-template-columns: auto repeat(auto-fit, minmax(14rem, 1fr));
@@ -111,6 +112,9 @@ h2 { margin: 0 0 0.8rem; }
 .active-threats { border: 1px solid rgba(255, 111, 166, 0.38); background: rgba(255, 111, 166, 0.08); }
 .deferred-threats { border: 1px solid rgba(255, 189, 89, 0.40); background: rgba(255, 189, 89, 0.07); }
 .pool-allocations { border: 1px solid rgba(126, 231, 255, 0.34); background: rgba(126, 231, 255, 0.07); }
+.design-issues { border: 1px solid rgba(255, 189, 89, 0.40); background: rgba(255, 189, 89, 0.07); }
+.design-issues article.warning { border-left: 2px solid rgba(255, 111, 166, 0.70); }
+.design-issues article.info { border-left: 2px solid rgba(126, 231, 255, 0.60); }
 .gm-panel { border: 1px solid rgba(210, 140, 255, 0.34); background: rgba(210, 140, 255, 0.07); grid-template-columns: 1fr; align-items: stretch; }
 .advantage-form { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
 .advantage-list { display: grid; gap: 0.65rem; }
@@ -118,15 +122,15 @@ h2 { margin: 0 0 0.8rem; }
 .advantage-list strong { display: block; }
 .advantage-list span { color: #cab7ff; font-size: 0.88rem; }
 .advantage-list button { grid-row: span 2; padding: 0.55rem 0.75rem; }
-.active-threats > span, .deferred-threats > span, .pool-allocations > span { text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
+.active-threats > span, .deferred-threats > span, .pool-allocations > span, .design-issues > span { text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; }
 .active-threats > span { color: #ffb3cf; }
-.deferred-threats > span { color: #ffbd59; }
+.deferred-threats > span, .design-issues > span { color: #ffbd59; }
 .pool-allocations > span { color: #7ee7ff; }
-.active-threats article, .deferred-threats article, .pool-allocations article { border-left: 2px solid rgba(126, 231, 255, 0.42); padding-left: 0.75rem; }
+.active-threats article, .deferred-threats article, .pool-allocations article, .design-issues article { border-left: 2px solid rgba(126, 231, 255, 0.42); padding-left: 0.75rem; }
 .active-threats article { border-left-color: rgba(255, 111, 166, 0.48); }
 .deferred-threats article { border-left-color: rgba(255, 189, 89, 0.50); }
 .threat-summary { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.75rem; align-items: center; }
-.active-threats strong, .active-threats small, .deferred-threats strong, .deferred-threats small, .pool-allocations strong, .pool-allocations small { display: block; }
+.active-threats strong, .active-threats small, .deferred-threats strong, .deferred-threats small, .pool-allocations strong, .pool-allocations small, .design-issues strong, .design-issues small { display: block; }
 
 .crawl-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 1rem; }
 

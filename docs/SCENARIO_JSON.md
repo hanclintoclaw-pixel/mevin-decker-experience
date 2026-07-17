@@ -43,6 +43,7 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 - Each private-side node should usually have 1-4 core featured `choices`. Existing 2-choice profiles remain valid; a 1-choice node is appropriate for a single locked door or terminal if it also provides a way to back out nearby.
 - A node may have a fifth choice only when that last choice is a back-out, return, retreat, or logoff option.
 - Tested choices are gated: by default, 1+ success unlocks and reveals the target node; failure locks that choice for the current crawl and reveals nothing beyond it.
+- Do not create double gates to one location: a tested choice should not lead to a node whose only substantive onward option is another tested choice. Merge those checks into one harder gate, or make the first success reveal a useful location, hub, result, or back-out option.
 - `shutdownTally` is optional. If omitted, the app infers it from the host rating and final sheaf threshold.
 - The app shows **Passive Alert** at roughly one-third of Shutdown and **Active Alert** at roughly two-thirds. Reaching Shutdown ends the run with dumpshock.
 - When Security Tally crosses a `securitySheaf` threshold, the app pauses normal navigation with a checkpoint. The player can suppress/evade, fight, ignore, or jack out; ignored or failed checkpoints become active pressure that adds Tally risk to later tested actions.
@@ -50,12 +51,35 @@ The Decker Experience loads a fictional Matrix-host scenario from JSON. The camp
 - The checkpoint, active-pressure, suppressed-queue, and final unresolved-IC summaries show built-in IC icons for `probe`, `trace`, `scramble`, `tarBaby`, `killer`, `blaster`, `sparky`, `black`, and `psychotropic`; unknown or generic security pressure uses the warning/pressure icon.
 - Runs now end explicitly through graceful logoff, emergency jack out, objective completion, trace completion, shutdown/dumpshock, failed-jackout dumpshock, ICON/deck crash, black IC harm, or psychotropic consequence. The final card tells the player to alert the GM, summarizes recovered outcomes and unresolved threats, and provides a Discord-ready copyable run report including final Security Tally.
 - A successful featured action should either reveal a new node or give a specific decker-facing result, such as customer files, shipping records, camera access, or a note to tell/ask the GM.
+- Final run reports should exclude pure flavor/fluff nodes, but include concrete discoveries, access, paydata, permanent changes, and GM-confirmation results. Use `kind: "confirmation"`, `kind: "reward"`, `kind: "paydata"`, `kind: "permanent-outcome"`, or explicit `report` metadata on concrete result nodes.
 - Nodes may grant run-scoped `advantages`: targeted passcodes, keys, found passwords, or access tokens that modify later rolls.
 - Permanent outcomes such as altered records, recurring orders, disabled devices, planted files, or changed access must tell the player to notify the GM. Current-crawl lockouts are not permanent by default; after in-world time passes, the GM may allow a reset and retry.
 - `choice.unlockSuccesses` is optional and raises the success threshold for harder routes. Omit it for the default 1-success gate.
 - `choice.targetNumber` and `choice.securityValue` are optional per-choice overrides for hidden/deeper layers that are harder than the outer Host default.
 - Current app utility mapping recognizes starter IDs such as `logon`, `browsePublic`, `searchCustomer`, `staffRecords`, `alterStore`, `controlSlave`, `evadeTrace`, `fightIc`, `findUvSeam`, and `breachUv`.
 - Keep descriptions short enough for live-session scanning.
+
+## Final report metadata
+
+Concrete result nodes can customize whether and how they appear in the Discord-ready final run report:
+
+```json
+{
+  "id": "camera-confirmation",
+  "title": "Camera Network Access",
+  "kind": "confirmation",
+  "description": "You appear to have access to the camera network. Confirm scope, feeds, controls, and blind spots with the GM.",
+  "report": {
+    "include": "always",
+    "title": "Camera network access",
+    "detail": "Mevin reached the camera network. Confirm visible feeds, controls, blind spots, and physical coverage with the GM.",
+    "notifyGm": true
+  },
+  "choices": []
+}
+```
+
+`report.include` accepts `always`, `auto`, or `never`. Omit it for normal auto behavior: reportable node kinds and concrete access/file/device/paydata-looking nodes are captured; public flavor, menus, setup, navigation, and exits are not. Use `never` for fun fluff that should stay out of the final Discord output.
 
 ## Run advantages
 
