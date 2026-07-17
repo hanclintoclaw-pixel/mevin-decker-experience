@@ -1016,7 +1016,8 @@ function App() {
   const [paydataResult, setPaydataResult] = useState<PaydataBrokerResult | undefined>()
   const hostNodeById = useMemo(() => new Map(host.flow.nodes.map((node) => [node.id, node])), [host])
   const hostMap = useMemo(() => buildHostMapLayout(host), [host])
-  const hostDesignIssues = useMemo(() => designIssuesForHost(host), [host])
+  const showHostDesignChecks = useMemo(() => new URLSearchParams(window.location.search).has('author'), [])
+  const hostDesignIssues = useMemo(() => showHostDesignChecks ? designIssuesForHost(host) : [], [host, showHostDesignChecks])
   const currentNode = useMemo(() => hostNodeById.get(crawl.currentNodeId) ?? host.flow.nodes[0], [host, hostNodeById, crawl.currentNodeId])
   const currentChoices = useMemo(() => frontDoorChoices(currentNode, host), [currentNode, host])
   const paydataTool = currentNode.tool?.type === 'paydataBroker' ? currentNode.tool : undefined
@@ -1535,7 +1536,7 @@ function App() {
         </div>
       </section>
 
-      {hostDesignIssues.length > 0 && <section className="design-issues"><span>Host design checks</span>{hostDesignIssues.map((issue, index) => <article key={`${issue.severity}-${index}`} className={issue.severity}><strong>{issue.severity === 'warning' ? 'Fix recommended' : 'Check report output'}</strong><small>{issue.message}</small></article>)}</section>}
+      {showHostDesignChecks && hostDesignIssues.length > 0 && <section className="design-issues"><span>Author-only host design checks</span>{hostDesignIssues.map((issue, index) => <article key={`${issue.severity}-${index}`} className={issue.severity}><strong>{issue.severity === 'warning' ? 'Fix recommended' : 'Check report output'}</strong><small>{issue.message}</small></article>)}</section>}
 
       <section className="status-grid">
         <article><span>Deck</span><strong>{deck.sourceName}</strong><small>{deck.handle} · DF {effectiveDetectionFactor}{dfPoolReserve > 0 ? ` (${deck.detectionFactor}+${effectiveDetectionFactor - deck.detectionFactor})` : ''} · Pool {effectiveHackingPool}/{hackingPoolAvailable} free, {totalCommittedPool} committed</small></article>
