@@ -379,14 +379,17 @@ h2 { margin: 0 0 0.8rem; }
 .map-legend .legend-found { color: #67ffb8; border-color: rgba(103, 255, 184, 0.46); background: rgba(103, 255, 184, 0.10); }
 .map-legend .legend-revealed { color: #7ee7ff; border-color: rgba(126, 231, 255, 0.42); background: rgba(126, 231, 255, 0.08); }
 .map-legend .legend-hidden { color: #9b8fc2; border-color: rgba(155, 143, 194, 0.28); background: rgba(155, 143, 194, 0.08); }
+.map-legend .legend-locked { color: #ffb3cf; border-color: rgba(255, 111, 166, 0.52); background: rgba(255, 111, 166, 0.12); }
 .host-map-scroll { overflow: auto; padding: 0.75rem 0.25rem 0.25rem; }
 .host-map-canvas { position: relative; min-width: 760px; border-radius: 20px; background: rgba(8, 5, 20, 0.42); }
 .host-map-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .host-map-lines marker path { fill: rgba(126, 231, 255, 0.62); }
+.host-map-lines #map-arrow-locked path { fill: rgba(255, 111, 166, 0.82); }
 .map-edge { stroke-width: 0.45; marker-end: url(#map-arrow); vector-effect: non-scaling-stroke; }
 .map-edge.found { stroke: rgba(103, 255, 184, 0.78); }
 .map-edge.revealed { stroke: rgba(126, 231, 255, 0.54); }
 .map-edge.hidden { stroke: rgba(155, 143, 194, 0.28); stroke-dasharray: 2 2; }
+.map-edge.locked { stroke: rgba(255, 111, 166, 0.82); stroke-dasharray: 1.2 1.2; marker-end: url(#map-arrow-locked); }
 .map-node {
   position: absolute;
   width: 11.5rem;
@@ -414,6 +417,15 @@ h2 { margin: 0 0 0.8rem; }
 }
 .map-node.hidden strong { color: transparent; text-shadow: 0 0 9px rgba(245, 240, 255, 0.75); }
 .map-node.hidden span { color: #9b8fc2; }
+.map-node.locked {
+  border-color: rgba(255, 111, 166, 0.68);
+  border-style: solid;
+  background: rgba(70, 10, 32, 0.82);
+  box-shadow: 0 0 30px rgba(255, 111, 166, 0.22);
+  opacity: 0.92;
+}
+.map-node.locked strong { color: #ffd6e6; text-shadow: none; }
+.map-node.locked span { color: #ff8fbd; }
 
 @keyframes alert-pulse {
   0%, 100% { opacity: 0.55; transform: scale(0.92); }

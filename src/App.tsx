@@ -226,6 +226,7 @@ interface HostMapEdge {
   from: string
   to: string
   label: string
+  choiceKey: string
   fromX: number
   fromY: number
   toX: number
@@ -445,7 +446,7 @@ function buildHostMapLayout(host: HostProfile): HostMapLayout {
   const nodeOrder = new Map(allNodes.map((node, index) => [node.id, index]))
   const nodeById = new Map(allNodes.map((node) => [node.id, node]))
   const depthById = new Map<string, number>([[host.flow.startNodeId, 0]])
-  const parentById = new Map<string, { from: string; label: string }>()
+  const parentById = new Map<string, { from: string; label: string; choiceKey: string }>()
   const queue = [host.flow.startNodeId]
 
   while (queue.length > 0) {
@@ -454,12 +455,12 @@ function buildHostMapLayout(host: HostProfile): HostMapLayout {
     const node = nodeById.get(nodeId)
     if (!node) continue
     const nextDepth = (depthById.get(nodeId) ?? 0) + 1
-    for (const choice of frontDoorChoices(node, host)) {
+    for (const [choiceIndex, choice] of frontDoorChoices(node, host).entries()) {
       if (!nodeById.has(choice.to) || choice.to === node.id) continue
       const existingDepth = depthById.get(choice.to)
       if (existingDepth !== undefined && existingDepth <= nextDepth) continue
       depthById.set(choice.to, nextDepth)
-      parentById.set(choice.to, { from: node.id, label: choice.label })
+      parentById.set(choice.to, { from: node.id, label: choice.label, choiceKey: choiceKey(node.id, choiceIndex) })
       queue.push(choice.to)
     }
   }
@@ -498,7 +499,7 @@ function buildHostMapLayout(host: HostProfile): HostMapLayout {
     const from = mapNodeById.get(parent.from)
     const to = mapNodeById.get(toId)
     if (!from || !to) return []
-    return [{ from: from.node.id, to: to.node.id, label: parent.label, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y }]
+    return [{ from: from.node.id, to: to.node.id, label: parent.label, choiceKey: parent.choiceKey, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y }]
   })
 
   return { nodes: mapNodes, edges, heightRem: Math.max(24, (maxDepth + 2) * 8) }
@@ -1711,6 +1712,7 @@ function App() {
             <span className="legend-found">Found</span>
             <span className="legend-revealed">Revealed</span>
             <span className="legend-hidden">Hidden</span>
+            <span className="legend-locked">Locked</span>
           </div>
         </div>
         <p className="micro">Found locations are places you have already been. Hidden zones stay obscured until the crawl reveals them.</p>
@@ -1721,13 +1723,17 @@ function App() {
                 <marker id="map-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
                   <path d="M0,0 L6,3.5 L0,7 Z" />
                 </marker>
+                <marker id="map-arrow-locked" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+                  <path d="M0,0 L6,3.5 L0,7 Z" />
+                </marker>
               </defs>
               {hostMap.edges.map((edge) => {
                 const fromVisited = crawl.visitedNodeIds.includes(edge.from)
                 const toVisited = crawl.visitedNodeIds.includes(edge.to)
                 const fromRevealed = edge.from === GRACEFUL_LOGOFF_NODE_ID || revealedNodeIds.includes(edge.from)
                 const toRevealed = edge.to === GRACEFUL_LOGOFF_NODE_ID || revealedNodeIds.includes(edge.to)
-                const edgeState = fromVisited && toVisited ? 'found' : fromRevealed && toRevealed ? 'revealed' : 'hidden'
+                const isLocked = choiceGates[edge.choiceKey]?.state === 'locked'
+                const edgeState = isLocked ? 'locked' : fromVisited && toVisited ? 'found' : fromRevealed && toRevealed ? 'revealed' : 'hidden'
                 const fromY = Math.min(100, edge.fromY + 4.5)
                 const toY = Math.max(0, edge.toY - 4.5)
                 const midY = (fromY + toY) / 2
@@ -1738,11 +1744,12 @@ function App() {
               const isCurrent = mapNode.node.id === crawl.currentNodeId
               const isVisited = crawl.visitedNodeIds.includes(mapNode.node.id)
               const isRevealed = mapNode.node.id === GRACEFUL_LOGOFF_NODE_ID || revealedNodeIds.includes(mapNode.node.id)
-              const mapState = isCurrent ? 'current' : isVisited ? 'found' : isRevealed ? 'revealed' : 'hidden'
+              const isLocked = !isCurrent && !isVisited && !isRevealed && hostMap.edges.some((edge) => edge.to === mapNode.node.id && choiceGates[edge.choiceKey]?.state === 'locked')
+              const mapState = isCurrent ? 'current' : isVisited ? 'found' : isRevealed ? 'revealed' : isLocked ? 'locked' : 'hidden'
               const canJump = isVisited && !isCurrent
               return <button key={mapNode.node.id} className={`map-node ${mapState}`} style={{ left: `${mapNode.x}%`, top: `${mapNode.y}%` }} disabled={!canJump} onClick={() => setCrawl((current) => ({ ...current, currentNodeId: mapNode.node.id }))}>
-                <strong>{isRevealed ? mapNode.node.title : `Unknown zone ${mapNode.hiddenIndex}`}</strong>
-                <span>{isCurrent ? 'Current location' : isVisited ? 'Found location' : isRevealed ? 'Revealed / not visited' : 'Hidden zone'}</span>
+                <strong>{isLocked ? 'Locked Path' : isRevealed ? mapNode.node.title : `Unknown zone ${mapNode.hiddenIndex}`}</strong>
+                <span>{isCurrent ? 'Current location' : isVisited ? 'Found location' : isRevealed ? 'Revealed / not visited' : isLocked ? 'Route burned by failed roll' : 'Hidden zone'}</span>
               </button>
             })}
           </div>
