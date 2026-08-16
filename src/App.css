@@ -426,6 +426,13 @@ h2 { margin: 0 0 0.8rem; }
 }
 .map-node.locked strong { color: #ffd6e6; text-shadow: none; }
 .map-node.locked span { color: #ff8fbd; }
+.map-node.locked .locked-title {
+  color: #f5f0ff;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
 
 @keyframes alert-pulse {
   0%, 100% { opacity: 0.55; transform: scale(0.92); }

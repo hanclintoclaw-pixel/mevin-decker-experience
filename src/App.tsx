@@ -1749,6 +1749,7 @@ function App() {
               const canJump = isVisited && !isCurrent
               return <button key={mapNode.node.id} className={`map-node ${mapState}`} style={{ left: `${mapNode.x}%`, top: `${mapNode.y}%` }} disabled={!canJump} onClick={() => setCrawl((current) => ({ ...current, currentNodeId: mapNode.node.id }))}>
                 <strong>{isLocked ? 'Locked Path' : isRevealed ? mapNode.node.title : `Unknown zone ${mapNode.hiddenIndex}`}</strong>
+                {isLocked && <span className="locked-title">{mapNode.node.title}</span>}
                 <span>{isCurrent ? 'Current location' : isVisited ? 'Found location' : isRevealed ? 'Revealed / not visited' : isLocked ? 'Route burned by failed roll' : 'Hidden zone'}</span>
               </button>
             })}
