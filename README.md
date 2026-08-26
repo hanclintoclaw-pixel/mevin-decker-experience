@@ -1,5 +1,7 @@
 # Mevin Decker Experience
 
+> **Frozen V1:** This repository is locked as the stable V1 version. Do not make future feature changes here unless the user explicitly asks to change or unfreeze V1. Default new work to [Mevin Decker Experience V2](https://hanclintoclaw-pixel.github.io/mevin-decker-experience-v2/) / `/Users/hanclaw/claw/projects/cindylou/mevin-decker-experience-v2`.
+
 A branching, fictional Shadowrun 3rd Edition Matrix-host flowchart scene tool for Mevin. It is meant for live table use: load a scenario JSON profile, click through connected node/encounter cards, choose from focused featured actions, roll provisional SR3-inspired table checks, update Security Tally, and reveal new route branches only when the decker succeeds.
 
 ## Data sources
